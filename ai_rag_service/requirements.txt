@@ -1,0 +1,8 @@
+fastapi==0.111.1
+uvicorn==0.23.2
+pymongo==4.6.0
+pydantic==1.10.9
+sentence-transformers==2.2.2
+torch==2.9.0
+llama-cpp-python==0.1.69
+python-dotenv==1.0.0
