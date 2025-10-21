@@ -6,3 +6,4 @@ sentence-transformers==2.2.2
 torch==2.9.0
 llama-cpp-python==0.1.69
 python-dotenv==1.0.0
+dnspython==2.6.1
