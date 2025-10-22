@@ -1,9 +1,13 @@
 fastapi==0.111.1
 uvicorn==0.23.2
 pymongo==4.6.0
-pydantic==1.10.9
-sentence-transformers==2.2.2
-torch==2.9.0
-llama-cpp-python==0.1.69
-python-dotenv==1.0.0
 dnspython==2.6.1
+pydantic==1.10.9
+# For GPU: Install with CUDA support using: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu129
+# For CPU only: Use default pip install torch
+torch>=2.8.0
+sentence-transformers==2.2.2
+transformers>=4.30.0
+requests==2.31.0
+numpy>=1.24.0,<2.0.0
+python-dotenv==1.0.0
