@@ -37,96 +37,99 @@ print(f"  To force CPU: Set OLLAMA_NUM_GPU=0 in .env")
 def generate_vendor_recommendation(prompt: str, vendor_data: list, min_similarity: float = None) -> dict:
     """
     Use LLaMA model to generate intelligent vendor recommendations.
+    Optimized for speed and accuracy.
     Returns a structured response with recommendations and reasoning.
     """
     
     # Use default from .env
     if min_similarity is None:
-        min_similarity = float(os.getenv("MIN_SIMILARITY_THRESHOLD", "0.5"))
-    """
-    Use LLaMA model to generate intelligent vendor recommendations.
-    Returns a structured response with recommendations and reasoning.
-    """
+        min_similarity = float(os.getenv("MIN_SIMILARITY_THRESHOLD", "0.3"))
     
-    # Filter vendors by minimum similarity threshold
+    # IMPROVED: Filter vendors more intelligently
+    # Only keep vendors that meet the minimum similarity threshold
     relevant_vendors = [v for v in vendor_data if v.get('similarity', 0) >= min_similarity]
     
-    # If no vendors meet the threshold, return a helpful message
-    if not relevant_vendors:
-        return {
-            "status": "no_match",
-            "message": "I couldn't find any vendors that closely match your requirements. Please provide more details about your event, such as:\n- Event type (e.g., wedding, birthday, corporate)\n- Specific services needed (e.g., decoration, catering, photography)\n- Location preferences\n- Budget range\n\nThis will help me find the most suitable vendors for you.",
-            "vendors": []
-        }
+    # If no vendors meet the threshold, check if there's at least one decent match
+    if not relevant_vendors and vendor_data:
+        # Get the best match
+        best_vendor = max(vendor_data, key=lambda x: x.get('similarity', 0))
+        best_similarity = best_vendor.get('similarity', 0)
+        
+        # If the best match is at least 20%, include it (lowered threshold)
+        # Otherwise, return no_match
+        if best_similarity >= 0.20:
+            relevant_vendors = [best_vendor]
+        else:
+            return {
+                "status": "no_match",
+                "message": "I couldn't find vendors that match your specific requirements. Consider:\n- Adjusting your location preferences\n- Expanding your budget range\n- Being more flexible with service types\n- Checking if similar vendors are available in nearby areas",
+                "vendors": []
+            }
     
-    # Limit to top 3 most similar vendors
+    # IMPROVED: Apply smart filtering to remove low-similarity outliers
+    # If we have multiple vendors, filter out ones that are significantly worse than the best
+    if len(relevant_vendors) > 1:
+        best_similarity = relevant_vendors[0].get('similarity', 0)
+        
+        # Keep vendors that are within a reasonable range of the best match
+        # A vendor should be at least 50% as good as the best match, or above absolute threshold
+        filtered_vendors = []
+        for vendor in relevant_vendors:
+            vendor_similarity = vendor.get('similarity', 0)
+            # Keep if: similarity is high enough OR within 50% of best match
+            if vendor_similarity >= max(min_similarity, best_similarity * 0.5):
+                filtered_vendors.append(vendor)
+        
+        relevant_vendors = filtered_vendors
+    
+    # Limit to maximum 3 vendors
     top_vendors = relevant_vendors[:3]
     
-    vendor_context = []
+    # Build concise vendor context for faster LLM processing
+    vendor_summaries = []
     for i, vendor in enumerate(top_vendors, 1):
-        vendor_info = f"""
-Vendor {i}:
-- Name: {vendor.get('vendorName', 'N/A')}
-- Type: {vendor.get('vendorType', 'N/A')}
-- Description: {vendor.get('description', 'N/A')}
-- Location: {vendor.get('location', 'N/A')}
-- Rating: {vendor.get('rating', 'N/A')}/5
-- Tags: {', '.join(vendor.get('tags', []))}
-- Pricing: {vendor.get('pricing', {}).get('currency', 'LKR')} {vendor.get('pricing', {}).get('averageCost', 'N/A')}
-- Similarity Score: {vendor.get('similarity', 0):.2%}
-"""
-        vendor_context.append(vendor_info)
+        # Extract key information only
+        summary = (
+            f"{i}. {vendor.get('vendorName')} ({vendor.get('vendorType')})\n"
+            f"   - Services: {vendor.get('description', 'N/A')[:200]}...\n"
+            f"   - Location: {vendor.get('location')}, Rating: {vendor.get('rating')}/5\n"
+            f"   - Budget: {vendor.get('pricing', {}).get('currency', 'LKR')} {vendor.get('pricing', {}).get('averageCost', 'N/A')}\n"
+            f"   - Match Score: {vendor.get('similarity', 0):.1%}"
+        )
+        vendor_summaries.append(summary)
     
-    # Create a detailed prompt for LLaMA
-    llm_prompt = f"""You are an expert event planning assistant. A user has requested: "{prompt}"
+    # Create optimized, concise prompt for faster LLM response
+    llm_prompt = f"""You are an event planning AI assistant. Analyze these vendors for: "{prompt}"
 
-Based on the user's request, I have found {len(top_vendors)} matching vendor(s). Please analyze each vendor and provide:
-1. A brief explanation of why each vendor matches (or doesn't perfectly match) the user's needs
-2. A ranking recommendation
-3. Any important considerations
+Vendors found:
+{chr(10).join(vendor_summaries)}
 
-Here are the vendors:
-{chr(10).join(vendor_context)}
+Provide a CONCISE response (max 150 words) with:
+1. Quick assessment of match quality
+2. Top recommendation with 1-2 key reasons
+3. Brief mention of alternatives if applicable
 
-Instructions:
-- Be specific about how each vendor relates to the user's request
-- If a vendor doesn't perfectly match, explain why and what aspects do match
-- Keep each explanation concise (2-3 sentences)
-- Rank them from most to least suitable
-- If the user's request is vague or incomplete, mention what additional information would help
-
-Provide your response in the following format:
-
-**Overall Assessment:**
-[Brief summary of how well these vendors match the request]
-
-**Recommended Vendors (Ranked):**
-
-1. [Vendor Name] - [Brief explanation of suitability and match to request]
-
-2. [Vendor Name] - [Brief explanation of suitability and match to request]
-
-3. [Vendor Name] - [Brief explanation of suitability and match to request]
-
-**Additional Recommendations:**
-[Any suggestions or considerations for the user]
-"""
+Keep it brief, actionable, and user-friendly. Focus on the BEST match."""
     
     try:
+        # Optimized request with shorter timeout and reduced verbosity
         response = requests.post(
             OLLAMA_API_URL,
             json={
                 "model": MODEL_NAME,
                 "prompt": llm_prompt,
                 "stream": False,
-                "options": GPU_CONFIG 
+                "options": {
+                    **GPU_CONFIG,
+                    "num_predict": 200,  # Limit response length for speed
+                }
             },
-            timeout=OLLAMA_TIMEOUT  
+            timeout=min(OLLAMA_TIMEOUT, 30)  # Cap at 30 seconds max
         )
         
         if response.status_code == 200:
             llm_response = response.json()
-            recommendation_text = llm_response.get('response', '')
+            recommendation_text = llm_response.get('response', '').strip()
             
             return {
                 "status": "success",
@@ -140,6 +143,12 @@ Provide your response in the following format:
             else:
                 raise Exception(f"LLM request failed with status code: {response.status_code}")
             
+    except requests.exceptions.Timeout:
+        print(f"LLM request timed out - using fallback")
+        if ENABLE_LLM_FALLBACK:
+            return generate_fallback_recommendation(prompt, top_vendors)
+        else:
+            raise Exception("LLM service timeout")
     except Exception as e:
         print(f"Error calling LLaMA model: {str(e)}")
         if ENABLE_LLM_FALLBACK:
@@ -150,23 +159,40 @@ Provide your response in the following format:
 
 def generate_fallback_recommendation(prompt: str, vendors: list) -> dict:
     """
-    Fallback recommendation if LLM is unavailable.
+    Fast fallback recommendation if LLM is unavailable.
+    Provides structured, user-friendly response without LLM.
     """
-    vendor_list = []
-    for i, vendor in enumerate(vendors, 1):
-        vendor_list.append(
-            f"{i}. {vendor.get('vendorName')} - {vendor.get('vendorType')} "
-            f"(Rating: {vendor.get('rating', 'N/A')}/5, Match: {vendor.get('similarity', 0):.0%})"
-        )
+    if not vendors:
+        return {
+            "status": "no_match",
+            "message": "No suitable vendors found. Try adjusting your search criteria.",
+            "vendors": []
+        }
     
-    message = f"""Based on your request: "{prompt}"
-
-I found {len(vendors)} suitable vendor(s):
-
-{chr(10).join(vendor_list)}
-
-Note: The LLM service is currently unavailable. These recommendations are based on similarity matching.
-"""
+    # Get top vendor
+    top_vendor = vendors[0]
+    vendor_name = top_vendor.get('vendorName', 'N/A')
+    similarity = top_vendor.get('similarity', 0)
+    
+    # Build recommendation message
+    message_parts = [
+        f"**Top Recommendation:** {vendor_name}",
+        f"",
+        f"This vendor matches your requirements with a {similarity:.0%} confidence score.",
+        f"",
+        f"**Why this vendor:**",
+        f"- Specializes in {top_vendor.get('vendorType', 'event services')}",
+        f"- Located in {top_vendor.get('location', 'your area')}",
+        f"- Rated {top_vendor.get('rating', 'N/A')}/5",
+        f"- Average cost: {top_vendor.get('pricing', {}).get('currency', 'LKR')} {top_vendor.get('pricing', {}).get('averageCost', 'N/A')}",
+    ]
+    
+    # Add alternatives if available
+    if len(vendors) > 1:
+        message_parts.append("")
+        message_parts.append(f"**Alternatives:** {len(vendors) - 1} other vendor(s) also available.")
+    
+    message = "\n".join(message_parts)
     
     return {
         "status": "success",

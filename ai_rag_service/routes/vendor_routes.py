@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from typing import List
 import os
 from dotenv import load_dotenv
 from database import vendor_collection
-from schemas import VendorSchema
+from schemas import VendorSchema, RecommendationRequest
 from services.vector_service import generate_embedding, compute_similarity
 from services.llama_service import generate_vendor_recommendation
 load_dotenv()
@@ -34,38 +34,46 @@ def get_vendors():
 
 # Recommend vendors based on user prompt
 @router.post("/recommend")
-def recommend_vendors(
-    user_prompt: str, 
-    min_similarity: float = None,  
-    max_results: int = None      
-):
+def recommend_vendors(request: RecommendationRequest = Body(...)):
     """
     Recommend vendors based on natural language user prompt using RAG.
+    Optimized for accuracy, efficiency, and speed.
     
     Args:
-        user_prompt: Natural language description of what the user needs
-        min_similarity: Minimum cosine similarity threshold (0.0 to 1.0, default from .env)
-        max_results: Maximum number of vendors to return (1-3, default from .env)
+        request: RecommendationRequest containing user_prompt, min_similarity, max_results
     
     Returns:
         Intelligent recommendation with reasoning from LLaMA model
     """
     
-    if min_similarity is None:
-        min_similarity = DEFAULT_MIN_SIMILARITY
-    if max_results is None:
-        max_results = DEFAULT_MAX_RESULTS
+    user_prompt = request.user_prompt
+    min_similarity = request.min_similarity if request.min_similarity is not None else DEFAULT_MIN_SIMILARITY
+    max_results = request.max_results if request.max_results is not None else DEFAULT_MAX_RESULTS
     
     # Validate input
     if not user_prompt or not user_prompt.strip():
         raise HTTPException(status_code=400, detail="User prompt cannot be empty.")
     
     # Validate max_results
-    if max_results < 1 or max_results > 3:
+    if max_results < 1 or max_results > 5:
         max_results = 3
     
-    # Retrieve all vendors from database
-    vendors = list(vendor_collection.find({}, {"_id": 0}))
+    # Retrieve all vendors from database (only necessary fields)
+    vendors = list(vendor_collection.find(
+        {},
+        {
+            "_id": 0,
+            "vendorName": 1,
+            "vendorType": 1,
+            "description": 1,
+            "location": 1,
+            "rating": 1,
+            "pricing": 1,
+            "tags": 1,
+            "contact": 1,
+            "vectorEmbedding": 1
+        }
+    ))
     
     if not vendors:
         raise HTTPException(status_code=404, detail="No vendors available in the database.")
@@ -76,18 +84,19 @@ def recommend_vendors(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating embedding: {str(e)}")
     
-    # Compute similarity scores for all vendors
+    # Compute similarity scores for all vendors (optimized)
+    vendors_with_scores = []
     for vendor in vendors:
         if 'vectorEmbedding' in vendor and vendor['vectorEmbedding']:
-            vendor['similarity'] = compute_similarity(prompt_embedding, vendor['vectorEmbedding'])
-        else:
-            vendor['similarity'] = 0.0
-
-    # Sort vendors by similarity (highest first)
-    vendors_sorted = sorted(vendors, key=lambda x: x['similarity'], reverse=True)
+            similarity = compute_similarity(prompt_embedding, vendor['vectorEmbedding'])
+            vendor['similarity'] = similarity
+            vendors_with_scores.append(vendor)
     
-    # Apply max_results limit
-    vendors_sorted = vendors_sorted[:max_results]
+    if not vendors_with_scores:
+        raise HTTPException(status_code=404, detail="No vendors have embeddings. Please re-index vendors.")
+
+    # Sort vendors by similarity (highest first) and apply limit
+    vendors_sorted = sorted(vendors_with_scores, key=lambda x: x['similarity'], reverse=True)[:max_results]
 
     # Generate intelligent recommendation using LLaMA
     result = generate_vendor_recommendation(user_prompt, vendors_sorted, min_similarity)
