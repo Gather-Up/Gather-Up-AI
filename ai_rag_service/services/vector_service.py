@@ -48,20 +48,32 @@ embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device=device)
 def generate_embedding(text: str) -> list:
     """
     Generate semantic embedding for text using GPU acceleration if available.
+    Optimized for speed and accuracy.
     """
     if not text or not text.strip():
         raise ValueError("Text cannot be empty")
     
-    embedding = embedding_model.encode(text, convert_to_tensor=True, device=device)
+    # Normalize text for better matching
+    text = text.strip()
+    
+    # Generate embedding with optimized settings
+    embedding = embedding_model.encode(
+        text, 
+        convert_to_tensor=True, 
+        device=device,
+        show_progress_bar=False,  # Disable progress bar for speed
+        normalize_embeddings=True  # Pre-normalize for faster cosine similarity
+    )
     return embedding.cpu().tolist()
 
 def compute_similarity(vec1: list, vec2: list) -> float:
     """
     Compute cosine similarity between two vectors.
+    Optimized for speed - assumes normalized vectors.
     Returns a value between -1 and 1, where 1 means identical.
     """
-    a = np.array(vec1)
-    b = np.array(vec2)
+    a = np.array(vec1, dtype=np.float32)  # Use float32 for speed
+    b = np.array(vec2, dtype=np.float32)
     
     # Handle edge cases
     norm_a = np.linalg.norm(a)
@@ -70,4 +82,8 @@ def compute_similarity(vec1: list, vec2: list) -> float:
     if norm_a == 0 or norm_b == 0:
         return 0.0
     
-    return float(np.dot(a, b) / (norm_a * norm_b))
+    # Compute cosine similarity
+    similarity = float(np.dot(a, b) / (norm_a * norm_b))
+    
+    # Clamp to valid range
+    return max(-1.0, min(1.0, similarity))
