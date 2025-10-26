@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field
+from pydantic import EmailStr
 from typing import List, Optional, Dict
 
 class AvailabilityItem(BaseModel):
@@ -31,4 +32,4 @@ class VendorSchema(BaseModel):
 class RecommendationRequest(BaseModel):
     user_prompt: str = Field(..., description="Natural language description of what the user needs")
     min_similarity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum similarity threshold (0-1)")
-    max_results: Optional[int] = Field(None, ge=1, le=5, description="Maximum number of vendors to return")
+    max_results: Optional[int] = Field(3, ge=1, le=5, description="Maximum number of vendors to return")
