@@ -2,6 +2,7 @@ import requests
 import json
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 
 OLLAMA_API_URL = os.getenv("OLLAMA_API_URL")
@@ -16,12 +17,11 @@ GPU_CONFIG = {
     "top_k": int(os.getenv("OLLAMA_TOP_K")),
     "repeat_penalty": float(os.getenv("OLLAMA_REPEAT_PENALTY")),
     "main_gpu": int(os.getenv("OLLAMA_MAIN_GPU")),
-    "low_vram": os.getenv("OLLAMA_LOW_VRAM", "False").lower() == "true",
+    "low_vram": os.getenv("OLLAMA_LOW_VRAM").lower() == "true",
 }
 
 OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT"))
-
-ENABLE_LLM_FALLBACK = os.getenv("ENABLE_LLM_FALLBACK", "True").lower() == "true"
+ENABLE_LLM_FALLBACK = os.getenv("ENABLE_LLM_FALLBACK").lower() == "true"
 
 print(f"✓ LLM Configuration loaded from .env:")
 print(f"  - Model: {MODEL_NAME}")
@@ -34,6 +34,7 @@ print(f"  - Fallback Enabled: {ENABLE_LLM_FALLBACK}")
 print(f"\n  Note: If GPU not available, Ollama will automatically use CPU.")
 print(f"  To force CPU: Set OLLAMA_NUM_GPU=0 in .env") 
 
+
 def generate_vendor_recommendation(prompt: str, vendor_data: list, min_similarity: float = None) -> dict:
     """
     Use LLaMA model to generate intelligent vendor recommendations.
@@ -45,18 +46,14 @@ def generate_vendor_recommendation(prompt: str, vendor_data: list, min_similarit
     if min_similarity is None:
         min_similarity = float(os.getenv("MIN_SIMILARITY_THRESHOLD", "0.3"))
     
-    # IMPROVED: Filter vendors more intelligently
-    # Only keep vendors that meet the minimum similarity threshold
+    # Filter vendors more intelligently
     relevant_vendors = [v for v in vendor_data if v.get('similarity', 0) >= min_similarity]
     
     # If no vendors meet the threshold, check if there's at least one decent match
     if not relevant_vendors and vendor_data:
-        # Get the best match
         best_vendor = max(vendor_data, key=lambda x: x.get('similarity', 0))
         best_similarity = best_vendor.get('similarity', 0)
         
-        # If the best match is at least 20%, include it (lowered threshold)
-        # Otherwise, return no_match
         if best_similarity >= 0.20:
             relevant_vendors = [best_vendor]
         else:
@@ -66,17 +63,13 @@ def generate_vendor_recommendation(prompt: str, vendor_data: list, min_similarit
                 "vendors": []
             }
     
-    # IMPROVED: Apply smart filtering to remove low-similarity outliers
-    # If we have multiple vendors, filter out ones that are significantly worse than the best
+    # Apply smart filtering to remove low-similarity outliers
     if len(relevant_vendors) > 1:
         best_similarity = relevant_vendors[0].get('similarity', 0)
         
-        # Keep vendors that are within a reasonable range of the best match
-        # A vendor should be at least 50% as good as the best match, or above absolute threshold
         filtered_vendors = []
         for vendor in relevant_vendors:
             vendor_similarity = vendor.get('similarity', 0)
-            # Keep if: similarity is high enough OR within 50% of best match
             if vendor_similarity >= max(min_similarity, best_similarity * 0.5):
                 filtered_vendors.append(vendor)
         
@@ -88,7 +81,6 @@ def generate_vendor_recommendation(prompt: str, vendor_data: list, min_similarit
     # Build concise vendor context for faster LLM processing
     vendor_summaries = []
     for i, vendor in enumerate(top_vendors, 1):
-        # Extract key information only
         summary = (
             f"{i}. {vendor.get('vendorName')} ({vendor.get('vendorType')})\n"
             f"   - Services: {vendor.get('description', 'N/A')[:200]}...\n"

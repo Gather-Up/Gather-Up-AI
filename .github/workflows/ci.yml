@@ -1,0 +1,55 @@
+name: CI - Test and Lint
+
+# This workflow runs on every push and pull request
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install API Gateway dependencies
+      run: |
+        cd services/api-gateway
+        pip install -r requirements.txt
+    
+    - name: Test API Gateway
+      run: |
+        cd services/api-gateway
+        pytest tests/ -v
+    
+    - name: Install Location Service dependencies
+      run: |
+        cd services/location-service
+        pip install -r requirements.txt
+    
+    - name: Test Location Service
+      run: |
+        cd services/location-service
+        pytest tests/ -v
+    
+    - name: Install Vendor Service dependencies
+      run: |
+        cd services/vendor-service
+        pip install fastapi uvicorn pydantic pytest pytest-asyncio pytest-cov pymongo dnspython python-dotenv requests
+    
+    - name: Test Vendor Service
+      run: |
+        cd services/vendor-service
+        pytest tests/ -v
+    
+    - name: All tests passed! 🎉
+      run: echo "All tests completed successfully!"

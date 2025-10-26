@@ -6,6 +6,7 @@ from database import vendor_collection
 from schemas import VendorSchema, RecommendationRequest
 from services.vector_service import generate_embedding, compute_similarity
 from services.llama_service import generate_vendor_recommendation
+
 load_dotenv()
 
 DEFAULT_MIN_SIMILARITY = float(os.getenv("MIN_SIMILARITY_THRESHOLD"))
@@ -13,10 +14,13 @@ DEFAULT_MAX_RESULTS = int(os.getenv("MAX_RESULTS"))
 
 router = APIRouter(prefix="/vendors", tags=["Vendors"])
 
-# Add or update vendor
+
 @router.post("/add")
 def add_vendor(vendor: VendorSchema):
-    vendor_dict = vendor.dict()
+    """
+    Add or update a vendor in the database with vector embedding
+    """
+    vendor_dict = vendor.model_dump()
     # Generate embedding for vendor description
     vendor_dict['vectorEmbedding'] = generate_embedding(vendor.description)
     result = vendor_collection.update_one(
@@ -26,13 +30,16 @@ def add_vendor(vendor: VendorSchema):
     )
     return {"message": "Vendor added/updated successfully."}
 
-# Retrieve all vendors
+
 @router.get("/")
 def get_vendors():
+    """
+    Retrieve all vendors from database
+    """
     vendors = list(vendor_collection.find({}, {"_id": 0}))
     return vendors
 
-# Recommend vendors based on user prompt
+
 @router.post("/recommend")
 def recommend_vendors(request: RecommendationRequest = Body(...)):
     """

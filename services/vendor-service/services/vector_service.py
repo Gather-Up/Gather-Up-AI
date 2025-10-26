@@ -3,11 +3,12 @@ import numpy as np
 import torch
 import os
 from dotenv import load_dotenv
+
 load_dotenv()
 
-EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME")
-EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE")
-EMBEDDING_REQUIRE_GPU = os.getenv("EMBEDDING_REQUIRE_GPU").lower() == "true"
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+EMBEDDING_DEVICE = os.getenv("EMBEDDING_DEVICE", "cuda")
+EMBEDDING_REQUIRE_GPU = os.getenv("EMBEDDING_REQUIRE_GPU", "False").lower() == "true"
 
 # Determine device based on GPU availability and configuration
 if EMBEDDING_REQUIRE_GPU:
@@ -26,7 +27,6 @@ if EMBEDDING_REQUIRE_GPU:
     print(f"  - Device: {device} (GPU-ONLY mode)")
     print(f"  - Require GPU: {EMBEDDING_REQUIRE_GPU}")
 else:
-
     if torch.cuda.is_available() and EMBEDDING_DEVICE == "cuda":
         device = 'cuda'
         print(f"✓ Embedding Model Configuration (from .env):")
@@ -36,7 +36,7 @@ else:
         print(f"  - Device: {device} (GPU mode with CPU fallback allowed)")
     else:
         device = 'cpu'
-        print(f"  Embedding Model Configuration (from .env):")
+        print(f"✓ Embedding Model Configuration (from .env):")
         print(f"  - Model: {EMBEDDING_MODEL_NAME}")
         print(f"  - GPU: Not available or disabled")
         print(f"  - Device: {device} (CPU mode)")
@@ -44,6 +44,7 @@ else:
         print(f"  - To use GPU: Install CUDA and set EMBEDDING_DEVICE=cuda in .env")
 
 embedding_model = SentenceTransformer(EMBEDDING_MODEL_NAME, device=device)
+
 
 def generate_embedding(text: str) -> list:
     """
@@ -65,6 +66,7 @@ def generate_embedding(text: str) -> list:
         normalize_embeddings=True  # Pre-normalize for faster cosine similarity
     )
     return embedding.cpu().tolist()
+
 
 def compute_similarity(vec1: list, vec2: list) -> float:
     """
