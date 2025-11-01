@@ -1,4 +1,4 @@
-fastapi==0.115.0
+fastapi==0.120.4
 uvicorn==0.32.0
 pymongo==4.6.0
 dnspython==2.6.1
