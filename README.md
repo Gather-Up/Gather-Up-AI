@@ -366,7 +366,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 👤 Author
 
 **Sachitha Samadhi**
-- GitHub: [@sachithasamadhib](https://github.com/sachithasamadhib)
+- GitHub: [@Gather-Up](https://github.com/Gather-Up)
 
 ---
 
