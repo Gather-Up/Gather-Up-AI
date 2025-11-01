@@ -1,7 +1,7 @@
 fastapi==0.115.0
 uvicorn==0.32.0
 pymongo==4.6.0
-dnspython==2.6.1
+dnspython==2.8.0
 pydantic==2.10.0
 pydantic-settings==2.6.0
 # For GPU: Install with CUDA support using: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu129
