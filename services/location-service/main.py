@@ -1,8 +1,3 @@
-"""
-Location Service - Venue search and recommendation microservice
-Uses Google Places API to find event venues
-"""
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.location_routes import router as location_router
