@@ -35,8 +35,10 @@ SERVICE_TIMEOUT = 30.0
 class EventPlanningRequest(BaseModel):
     """User's natural language prompt for event planning"""
     prompt: str = Field(..., description="Natural language description of the event needs")
-    min_similarity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum similarity threshold")
-    max_results: Optional[int] = Field(3, ge=1, le=5, description="Maximum results per category")
+    min_similarity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Minimum similarity threshold for vendors")
+    max_results: Optional[int] = Field(3, ge=1, description="Maximum results for both vendors and locations")
+    max_vendor_results: Optional[int] = Field(None, ge=1, le=5, description="Maximum vendor results (overrides max_results)")
+    max_location_results: Optional[int] = Field(None, ge=1, description="Maximum location results (overrides max_results)")
 
 
 class HealthStatus(BaseModel):
@@ -103,16 +105,21 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
     
     async with httpx.AsyncClient(timeout=SERVICE_TIMEOUT) as client:
         try:
+            # Determine max_results for each service
+            # If specific max_*_results is provided, use it; otherwise use general max_results
+            vendor_max_results = request.max_vendor_results if request.max_vendor_results is not None else request.max_results
+            location_max_results = request.max_location_results if request.max_location_results is not None else request.max_results
+            
             # Prepare request payloads
             vendor_payload = {
                 "user_prompt": request.prompt,
                 "min_similarity": request.min_similarity,
-                "max_results": request.max_results
+                "max_results": vendor_max_results
             }
             
             location_payload = {
                 "query": request.prompt,
-                "max_results": request.max_results
+                "max_results": location_max_results
             }
             
             # Call both services in parallel for efficiency
