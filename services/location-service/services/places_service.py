@@ -1,4 +1,4 @@
-import requests
+﻿import requests
 import os
 import re
 from dotenv import load_dotenv
@@ -10,6 +10,7 @@ GOOGLE_PLACES_API_KEY = os.getenv("GOOGLE_PLACES_API_KEY")
 PLACES_TEXT_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 PLACES_NEARBY_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+PLACES_PHOTO_URL = "https://maps.googleapis.com/maps/api/place/photo"
 
 # Default location (Colombo, Sri Lanka) as fallback
 DEFAULT_LOCATION = {
@@ -29,19 +30,23 @@ EVENT_VENUE_TYPES = {
     "corporate": "conference_center|event_venue",
     "concert": "stadium|event_venue",
     "exhibition": "convention_center|event_venue",
-    "gala": "banquet_hall|event_venue"
+    "gala": "banquet_hall|event_venue",
+    "funeral": "funeral_home|church|place_of_worship",
+    "memorial": "funeral_home|church|place_of_worship",
+    "birthday": "banquet_hall|restaurant|event_venue",
+    "anniversary": "banquet_hall|restaurant|event_venue"
 }
 
 
 def parse_location_query(query: str) -> Dict:
-    """
+    '''
     Parse natural language query to extract location details.
     
     Examples:
     - "hackathon venue in Colombo" -> {city: "Colombo", venue_type: "coworking_space"}
     - "place like Hatchworks" -> {specific_name: "Hatchworks"}
     - "conference center for 100 people in Kandy" -> {city: "Kandy", venue_type: "conference_center"}
-    """
+    '''
     query_lower = query.lower()
     parsed = {
         "search_query": query,
@@ -85,7 +90,7 @@ def search_places(
     max_results: int = 3,
     location_type: Optional[str] = None
 ) -> List[Dict]:
-    """
+    '''
     Search for places using Google Places API Text Search.
     
     Args:
@@ -96,13 +101,11 @@ def search_places(
         location_type: Google Places type filter
     
     Returns:
-        List of place details
-    """
+        List of place details with comprehensive information
+    '''
     
     if not GOOGLE_PLACES_API_KEY:
-        # Fallback mode without API key - return mock data
-        print("Warning: GOOGLE_PLACES_API_KEY not found. Using mock data.")
-        return get_mock_locations(query, max_results)
+        raise ValueError("GOOGLE_PLACES_API_KEY not configured. Please set the API key in your .env file.")
     
     # Build search query
     search_query = query
@@ -122,38 +125,91 @@ def search_places(
         response = requests.get(PLACES_TEXT_SEARCH_URL, params=params, timeout=10)
         
         if response.status_code != 200:
-            print(f"Google Places API error: {response.status_code}")
-            return get_mock_locations(query, max_results)
+            raise Exception(f"Google Places API returned status code {response.status_code}: {response.text}")
         
         data = response.json()
         
+        if data.get("status") == "ZERO_RESULTS":
+            return []  # No results found, return empty list
+        
         if data.get("status") != "OK":
-            print(f"Google Places API status: {data.get('status')}")
-            return get_mock_locations(query, max_results)
+            raise Exception(f"Google Places API error: {data.get('status')} - {data.get('error_message', 'Unknown error')}")
         
         places = data.get("results", [])[:max_results]
         
-        # Format the results
+        # Format the results with enhanced details
         formatted_places = []
         for place in places:
+            place_id = place.get("place_id")
+            geometry = place.get("geometry", {})
+            location_coords = geometry.get("location", {})
+            
+            # Get detailed information for this place
+            details = get_place_details(place_id) if place_id else {}
+            
             formatted_place = {
-                "place_id": place.get("place_id"),
+                # Basic Information
+                "place_id": place_id,
                 "name": place.get("name"),
                 "address": place.get("formatted_address"),
-                "location": place.get("geometry", {}).get("location", {}),
+                "location": {
+                    "lat": location_coords.get("lat"),
+                    "lng": location_coords.get("lng")
+                },
+                
+                # Category/Type
+                "category": place.get("types", [])[0] if place.get("types") else "unknown",
+                "types": place.get("types", []),
+                
+                # Rating & Reviews
                 "rating": place.get("rating"),
                 "user_ratings_total": place.get("user_ratings_total"),
-                "types": place.get("types", []),
-                "vicinity": place.get("vicinity"),
+                "reviews": details.get("reviews", [])[:3] if details else [],  # Top 3 reviews
+                
+                # Contact Information
+                "contact_info": {
+                    "phone": details.get("formatted_phone_number"),
+                    "website": details.get("website"),
+                    "google_maps_url": details.get("url")
+                },
+                
+                # Opening Hours
+                "opening_hours": details.get("opening_hours"),
+                
+                # Business Details
                 "business_status": place.get("business_status"),
-                "price_level": place.get("price_level")
+                "price_level": place.get("price_level"),
+                "vicinity": place.get("vicinity"),
+                
+                # Amenities/Facilities
+                "amenities": {
+                    "wheelchair_accessible": details.get("wheelchair_accessible_entrance")
+                }
             }
             
             # Add photo references if available
             if "photos" in place:
                 formatted_place["photos"] = [
-                    photo.get("photo_reference") for photo in place["photos"][:3]
+                    {
+                        "photo_reference": photo.get("photo_reference"),
+                        "width": photo.get("width"),
+                        "height": photo.get("height"),
+                        "photo_url": f"{PLACES_PHOTO_URL}?maxwidth=400&photo_reference={photo.get('photo_reference')}&key={GOOGLE_PLACES_API_KEY}"
+                    }
+                    for photo in place["photos"][:3]  # Limit to 3 photos
                 ]
+            else:
+                formatted_place["photos"] = []
+            
+            # Add nearby places for context
+            if location_coords.get("lat") and location_coords.get("lng"):
+                formatted_place["nearby_places"] = get_nearby_places(
+                    location_coords.get("lat"),
+                    location_coords.get("lng"),
+                    radius=500
+                )
+            else:
+                formatted_place["nearby_places"] = []
             
             formatted_places.append(formatted_place)
         
@@ -161,21 +217,27 @@ def search_places(
         
     except Exception as e:
         print(f"Error calling Google Places API: {str(e)}")
-        return get_mock_locations(query, max_results)
+        raise
 
 
 def get_place_details(place_id: str) -> Dict:
-    """
-    Get detailed information about a specific place.
-    """
+    '''
+    Get detailed information about a specific place using Google Places Details API.
+    
+    Args:
+        place_id: The unique identifier for a place
+        
+    Returns:
+        Dictionary containing detailed place information
+    '''
     
     if not GOOGLE_PLACES_API_KEY:
-        return {"error": "API key not configured"}
+        return {}
     
     params = {
         "place_id": place_id,
         "key": GOOGLE_PLACES_API_KEY,
-        "fields": "name,formatted_address,geometry,rating,opening_hours,photos,price_level,website,formatted_phone_number,reviews"
+        "fields": "name,formatted_address,geometry,rating,opening_hours,photos,price_level,website,formatted_phone_number,reviews,wheelchair_accessible_entrance,business_status,types,url"
     }
     
     try:
@@ -186,6 +248,7 @@ def get_place_details(place_id: str) -> Dict:
             if data.get("status") == "OK":
                 return data.get("result", {})
         
+        print(f"Warning: Could not fetch details for place {place_id}")
         return {}
         
     except Exception as e:
@@ -193,74 +256,51 @@ def get_place_details(place_id: str) -> Dict:
         return {}
 
 
-def get_mock_locations(query: str, max_results: int = 3) -> List[Dict]:
-    """
-    Return mock location data when Google Places API is unavailable.
-    This is for development/testing purposes.
-    """
-    mock_venues = [
-        {
-            "place_id": "mock_1",
-            "name": "Hatchworks Colombo",
-            "address": "371/A Galle Rd, Colombo 00300, Sri Lanka",
-            "location": {"lat": 6.9018, "lng": 79.8509},
-            "rating": 4.5,
-            "user_ratings_total": 150,
-            "types": ["coworking_space", "event_venue"],
-            "vicinity": "Colombo 3",
-            "business_status": "OPERATIONAL",
-            "price_level": 3
-        },
-        {
-            "place_id": "mock_2",
-            "name": "Cinnamon Grand Colombo",
-            "address": "77 Galle Rd, Colombo 00300, Sri Lanka",
-            "location": {"lat": 6.9147, "lng": 79.8501},
-            "rating": 4.6,
-            "user_ratings_total": 3500,
-            "types": ["hotel", "conference_center", "banquet_hall"],
-            "vicinity": "Colombo 3",
-            "business_status": "OPERATIONAL",
-            "price_level": 4
-        },
-        {
-            "place_id": "mock_3",
-            "name": "BMICH - Bandaranaike Memorial International Conference Hall",
-            "address": "Bauddhaloka Mawatha, Colombo 00700, Sri Lanka",
-            "location": {"lat": 6.9175, "lng": 79.8653},
-            "rating": 4.3,
-            "user_ratings_total": 1200,
-            "types": ["conference_center", "event_venue"],
-            "vicinity": "Colombo 7",
-            "business_status": "OPERATIONAL",
-            "price_level": 3
-        },
-        {
-            "place_id": "mock_4",
-            "name": "Trace Expert City",
-            "address": "No 200, Union Place, Colombo 00200, Sri Lanka",
-            "location": {"lat": 6.9147, "lng": 79.8612},
-            "rating": 4.4,
-            "user_ratings_total": 500,
-            "types": ["coworking_space", "event_venue"],
-            "vicinity": "Colombo 2",
-            "business_status": "OPERATIONAL",
-            "price_level": 2
-        }
-    ]
+def get_nearby_places(lat: float, lng: float, radius: int = 1000, place_type: str = None) -> List[Dict]:
+    '''
+    Get nearby places for context and navigation using Google Places Nearby Search API.
     
-    # Simple filtering based on query
-    query_lower = query.lower()
-    filtered_venues = []
+    Args:
+        lat: Latitude
+        lng: Longitude
+        radius: Search radius in meters (default: 1000)
+        place_type: Type of places to search for (optional)
     
-    for venue in mock_venues:
-        if (query_lower in venue["name"].lower() or 
-            any(t in query_lower for t in ["hackathon", "coworking", "tech"]) and "coworking_space" in venue["types"] or
-            any(t in query_lower for t in ["conference", "meeting", "seminar"]) and "conference_center" in venue["types"]):
-            filtered_venues.append(venue)
+    Returns:
+        List of nearby places with basic information
+    '''
     
-    # If no specific matches, return all
-    if not filtered_venues:
-        filtered_venues = mock_venues
+    if not GOOGLE_PLACES_API_KEY:
+        return []
     
-    return filtered_venues[:max_results]
+    params = {
+        "location": f"{lat},{lng}",
+        "radius": radius,
+        "key": GOOGLE_PLACES_API_KEY
+    }
+    
+    if place_type:
+        params["type"] = place_type
+    
+    try:
+        response = requests.get(PLACES_NEARBY_SEARCH_URL, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "OK":
+                places = data.get("results", [])[:5]  # Limit to 5 nearby places
+                return [
+                    {
+                        "name": place.get("name"),
+                        "type": place.get("types", [])[0] if place.get("types") else "unknown",
+                        "vicinity": place.get("vicinity"),
+                        "distance": "nearby"  # Could calculate actual distance if needed
+                    }
+                    for place in places
+                ]
+        
+        return []
+        
+    except Exception as e:
+        print(f"Error fetching nearby places: {str(e)}")
+        return []
