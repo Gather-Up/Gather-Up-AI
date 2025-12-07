@@ -19,10 +19,6 @@
 ```
 Gather-Up-AI/
 │
-├── .github/
-│   └── workflows/
-│       └── ci.yml                # GitHub Actions CI/CD workflow
-│
 ├── services/
 │   ├── api-gateway/              # Main entry point - Routes requests to services
 │   │   ├── main.py
@@ -59,7 +55,7 @@ Gather-Up-AI/
 │       └── tests/
 │           └── test_main.py
 │
-├── .venv/                        # Shared virtual environment
+├── .venv/                       
 ├── .gitignore
 ├── README.md
 ```
@@ -103,54 +99,6 @@ Gather-Up-AI/
 
 ---
 
-## 🧪 Testing
-
-### Running Tests Locally
-
-Each service has its own test suite. To run tests:
-
-**Test all services:**
-```powershell
-# API Gateway
-cd services/api-gateway
-pytest tests/ -v
-
-# Location Service
-cd services/location-service
-pytest tests/ -v
-
-# Vendor Service
-cd services/vendor-service
-pytest tests/ -v
-```
-
-**Run with coverage:**
-```powershell
-pytest tests/ -v --cov --cov-report=html
-```
-
-### Test Structure
-
-- Each service has a `tests/` directory
-- Tests are written using `pytest`
-- Current tests cover health check endpoints
-- More tests can be added as the project grows
-
-### Continuous Integration
-
-This project uses **GitHub Actions** for automated testing:
-
-- ✅ Runs on every push and pull request
-- ✅ Tests all three microservices
-- ✅ Uses Python 3.11
-- ✅ Automatically installs dependencies and runs tests
-
-**Workflow File:** `.github/workflows/ci.yml`
-
-You can view test results in the **Actions** tab on GitHub after pushing your code.
-
----
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -162,7 +110,7 @@ You can view test results in the **Actions** tab on GitHub after pushing your co
 ### 1️⃣ Clone the Repository
 
 ```powershell
-git clone https://github.com/sachithasamadhib/Gather-Up-AI.git
+git clone https://github.com/Gather-Up/Gather-Up-AI
 cd Gather-Up-AI
 ```
 
