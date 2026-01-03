@@ -30,8 +30,8 @@ SERVICES = [
     {
         "name": "Image Service",
         "path": PROJECT_ROOT / "services" / "image-service",
-        "command": "python generate_image.py",
-        "port": "N/A"
+        "command": "python main.py",
+        "port": "8003"
     }
 ]
 
@@ -113,6 +113,10 @@ def main():
     print(f"  • API Gateway:      http://localhost:8000")
     print(f"  • Vendor Service:   http://localhost:8001")
     print(f"  • Location Service: http://localhost:8002")
+    print(f"  • Image Service:    http://localhost:8003")
+    print()
+    print("⚠️  Important: Ensure ComfyUI is running on http://localhost:8188")
+    print("   Image service requires ComfyUI to be active.")
     print()
     print("📝 Each service is running in a separate window.")
     print("   Close the windows to stop the services.")

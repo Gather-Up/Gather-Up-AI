@@ -8,9 +8,11 @@
 
 - 🤖 **AI-Powered Recommendations**: Uses LLM and RAG (Retrieval-Augmented Generation) for intelligent vendor suggestions
 - 📍 **Smart Location Search**: Integrates with Google Places API to find ideal event venues
+- 🎨 **AI Image Generation**: Creates stunning event visuals using Stable Diffusion XL via ComfyUI
 - 🔗 **Microservices Architecture**: Scalable, modular design with separate services for different functionalities
 - 🚀 **FastAPI Backend**: High-performance async API services
 - 🧠 **Vector Search**: Semantic similarity search using sentence transformers
+- 📡 **Real-time Streaming**: Server-Sent Events for live image generation progress
 
 ---
 
@@ -40,24 +42,39 @@ Gather-Up-AI/
 │   │   └── tests/
 │   │       └── test_main.py
 │   │
-│   └── vendor-service/           # RAG-based vendor recommendations
+│   ├── vendor-service/           # RAG-based vendor recommendations
+│   │   ├── main.py
+│   │   ├── requirements.txt
+│   │   ├── database.py
+│   │   ├── schemas.py
+│   │   ├── .env.example
+│   │   ├── .env
+│   │   ├── routes/
+│   │   │   └── vendor_routes.py
+│   │   ├── services/
+│   │   │   ├── llama_service.py
+│   │   │   └── vector_service.py
+│   │   └── tests/
+│   │       └── test_main.py
+│   │
+│   └── image-service/            # 🆕 AI Image Generation with SDXL
 │       ├── main.py
 │       ├── requirements.txt
-│       ├── database.py
 │       ├── schemas.py
-│       ├── .env.example
 │       ├── .env
 │       ├── routes/
-│       │   └── vendor_routes.py
+│       │   └── image_routes.py
 │       ├── services/
-│       │   ├── llama_service.py
-│       │   └── vector_service.py
-│       └── tests/
-│           └── test_main.py
+│       │   ├── comfyui_service.py
+│       │   └── llama_service.py
+│       ├── test_service.py
+│       └── README.md
 │
-├── .venv/                       
+├── .venv/
+├── start_all.py                  # 🔥 One-click launcher for all services
+├── COMFYUI_SETUP.md             # 🎨 ComfyUI installation guide
 ├── .gitignore
-├── README.md
+└── README.md
 ```
 
 ---
@@ -68,6 +85,7 @@ Gather-Up-AI/
 - Central entry point for all client requests
 - Routes requests to appropriate microservices
 - Handles CORS and request/response aggregation
+- Supports streaming responses for image generation
 
 ### **Vendor Service** (Port: 8001)
 - Manages vendor data in MongoDB
@@ -80,6 +98,13 @@ Gather-Up-AI/
 - Searches for venues based on location and event type
 - Returns detailed venue information including ratings and contact details
 
+### **Image Service** (Port: 8003) 🆕
+- AI-powered image generation using Stable Diffusion XL
+- Prompt enhancement with Llama 3.2 3B for better results
+- Real-time progress streaming via Server-Sent Events
+- Integration with ComfyUI for professional image generation
+- Supports up to 3 images per request with full customization
+
 ---
 
 ## 🛠️ Technology Stack
@@ -91,8 +116,11 @@ Gather-Up-AI/
   - PyTorch
   - Sentence Transformers
   - Hugging Face Transformers
+  - Stable Diffusion XL (via ComfyUI)
+  - Llama 3.2 3B (via Ollama)
 - **External APIs**: Google Places API
-- **HTTP Client**: HTTPX, Requests
+- **Image Generation**: ComfyUI with SDXL
+- **HTTP Client**: HTTPX, Requests, aiohttp
 - **Environment Management**: python-dotenv
 - **Testing**: pytest, pytest-asyncio, pytest-cov
 - **CI/CD**: GitHub Actions
@@ -106,6 +134,8 @@ Gather-Up-AI/
 - Python **3.10+** installed
 - MongoDB instance (for vendor service)
 - Google Places API key (for location service)
+- **ComfyUI with SDXL** (for image service) - See [COMFYUI_SETUP.md](COMFYUI_SETUP.md)
+- **Ollama with Llama 3.2 3B** (for AI enhancements)
 
 ### 1️⃣ Clone the Repository
 
@@ -147,6 +177,7 @@ Install all service dependencies into the shared virtual environment:
 pip install -r services/api-gateway/requirements.txt
 pip install -r services/location-service/requirements.txt
 pip install -r services/vendor-service/requirements.txt
+pip install -r services/image-service/requirements.txt
 ```
 
 **Note**: For GPU support with PyTorch, use:
@@ -179,9 +210,40 @@ cp .env.example .env
 # Add your MONGODB_URI and other configurations
 ```
 
+**Image Service:** 🆕
+```powershell
+cd services/image-service
+# .env already created - verify COMFYUI_URL and OLLAMA_API_URL
+```
+
+### 5.5️⃣ Setup ComfyUI (for Image Service) 🎨
+
+Follow the detailed guide: **[COMFYUI_SETUP.md](COMFYUI_SETUP.md)**
+
+Quick steps:
+1. Install ComfyUI
+2. Download SDXL Base 1.0 model
+3. Start ComfyUI on port 8188
+4. Verify with: `http://localhost:8188`
+
 ### 6️⃣ Run the Services
 
-Open **3 separate terminal windows**, activate the virtual environment in each, and run:
+**Option A: One-Click Launcher** 🔥 **RECOMMENDED**
+
+```powershell
+# From project root
+python start_all.py
+```
+
+This will open separate windows for:
+- API Gateway (8000)
+- Vendor Service (8001)
+- Location Service (8002)
+- Image Service (8003)
+
+**Option B: Manual Start**
+
+Open **4 separate terminal windows**, activate the virtual environment in each, and run:
 
 **Terminal 1 - API Gateway:**
 ```powershell

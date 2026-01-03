@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 import httpx
@@ -27,9 +28,11 @@ app.add_middleware(
 # Service URLs from environment variables
 VENDOR_SERVICE_URL = os.getenv("VENDOR_SERVICE_URL")
 LOCATION_SERVICE_URL = os.getenv("LOCATION_SERVICE_URL")
+IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8003")
 
 # Request timeout
 SERVICE_TIMEOUT = 30.0
+IMAGE_SERVICE_TIMEOUT = 300.0
 
 
 class EventPlanningRequest(BaseModel):
@@ -78,6 +81,13 @@ async def health_check():
             services_status["location-service"] = "healthy" if response.status_code == 200 else "unhealthy"
         except Exception as e:
             services_status["location-service"] = f"unreachable: {str(e)}"
+        
+        # Check Image Service
+        try:
+            response = await client.get(f"{IMAGE_SERVICE_URL}/health")
+            services_status["image-service"] = "healthy" if response.status_code == 200 else "unhealthy"
+        except Exception as e:
+            services_status["image-service"] = f"unreachable: {str(e)}"
     
     all_healthy = all(status == "healthy" for status in services_status.values())
     
@@ -97,7 +107,8 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
     1. Parse user's natural language prompt
     2. Query vendor-service for vendor recommendations (parallel)
     3. Query location-service for venue recommendations (parallel)
-    4. Aggregate and return comprehensive results
+    4. Generate AI images for the event (parallel)
+    5. Aggregate and return comprehensive results
     """
     
     if not request.prompt or not request.prompt.strip():
@@ -122,7 +133,19 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                 "max_results": location_max_results
             }
             
-            # Call both services in parallel for efficiency
+            # Prepare image generation payload (based on user prompt)
+            image_payload = {
+                "prompt": request.prompt,
+                "num_images": 2,  # Generate 2 images for the event
+                "steps": 25,      # Balanced speed/quality
+                "width": 1024,
+                "height": 1024,
+                "cfg_scale": 7.5,
+                "sampler_name": "dpmpp_2m",
+                "scheduler": "karras"
+            }
+            
+            # Call all services in parallel for efficiency
             vendor_task = client.post(
                 f"{VENDOR_SERVICE_URL}/api/vendors/recommend",
                 json=vendor_payload
@@ -133,10 +156,18 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                 json=location_payload
             )
             
-            # Wait for both responses
-            vendor_response, location_response = await asyncio.gather(
+            # Call image service with extended timeout
+            image_task = client.post(
+                f"{IMAGE_SERVICE_URL}/api/images/generate",
+                json=image_payload,
+                timeout=IMAGE_SERVICE_TIMEOUT
+            )
+            
+            # Wait for all responses
+            vendor_response, location_response, image_response = await asyncio.gather(
                 vendor_task,
                 location_task,
+                image_task,
                 return_exceptions=True
             )
             
@@ -174,13 +205,31 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                     "locations": []
                 }
             
+            # Process image service response
+            image_data = {}
+            if isinstance(image_response, Exception):
+                image_data = {
+                    "status": "error",
+                    "message": f"Image service error: {str(image_response)}",
+                    "images": []
+                }
+            elif image_response.status_code == 200:
+                image_data = image_response.json()
+            else:
+                image_data = {
+                    "status": "error",
+                    "message": f"Image service returned status {image_response.status_code}",
+                    "images": []
+                }
+            
             # Aggregate results
             return {
                 "status": "success",
                 "user_prompt": request.prompt,
                 "recommendations": {
                     "vendors": vendor_data,
-                    "locations": location_data
+                    "locations": location_data,
+                    "images": image_data
                 },
                 "summary": generate_summary(vendor_data, location_data)
             }
@@ -280,6 +329,117 @@ def generate_summary(vendor_data: Dict, location_data: Dict) -> str:
         return "No recommendations found. Please try refining your search criteria."
     
     return " and ".join(summary_parts) + " for your event."
+
+
+# ========== IMAGE GENERATION ENDPOINTS ==========
+
+class ImageGenerationRequest(BaseModel):
+    """Image generation request schema"""
+    prompt: str = Field(..., description="Description of the image to generate")
+    num_images: int = Field(default=1, ge=1, le=3, description="Number of images (1-3)")
+    negative_prompt: Optional[str] = None
+    width: int = Field(default=1024, ge=512, le=2048)
+    height: int = Field(default=1024, ge=512, le=2048)
+    steps: int = Field(default=30, ge=1, le=150)
+    cfg_scale: float = Field(default=7.0, ge=1.0, le=30.0)
+    sampler_name: str = Field(default="dpmpp_2m")
+    scheduler: str = Field(default="karras")
+    seed: Optional[int] = None
+    denoise: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+@app.post("/api/v1/images/generate", tags=["Images"])
+async def generate_images(request: ImageGenerationRequest = Body(...)):
+    """
+    Generate images using SDXL via ComfyUI (non-streaming)
+    Returns complete result after generation
+    """
+    async with httpx.AsyncClient(timeout=IMAGE_SERVICE_TIMEOUT) as client:
+        try:
+            response = await client.post(
+                f"{IMAGE_SERVICE_URL}/api/images/generate",
+                json=request.model_dump()
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Image service error: {response.text}"
+                )
+        
+        except httpx.TimeoutException:
+            raise HTTPException(
+                status_code=504,
+                detail="Image generation timeout - please try with fewer steps or smaller images"
+            )
+        except httpx.RequestError as e:
+            raise HTTPException(
+                status_code=503,
+                detail=f"Cannot reach image service: {str(e)}"
+            )
+
+
+@app.post("/api/v1/images/generate/stream", tags=["Images"])
+async def generate_images_stream(request: ImageGenerationRequest = Body(...)):
+    """
+    Generate images with real-time streaming progress (SSE)
+    Perfect for frontend integration with live updates
+    """
+    async def stream_from_image_service():
+        try:
+            async with httpx.AsyncClient(timeout=IMAGE_SERVICE_TIMEOUT) as client:
+                async with client.stream(
+                    "POST",
+                    f"{IMAGE_SERVICE_URL}/api/images/generate/stream",
+                    json=request.model_dump()
+                ) as response:
+                    if response.status_code != 200:
+                        yield f"data: {{\"status\": \"error\", \"message\": \"Image service error: {response.status_code}\"}}\n\n"
+                        return
+                    
+                    async for chunk in response.aiter_text():
+                        yield chunk
+        
+        except Exception as e:
+            yield f"data: {{\"status\": \"error\", \"message\": \"Stream error: {str(e)}\"}}\n\n"
+    
+    return StreamingResponse(
+        stream_from_image_service(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.post("/api/v1/images/enhance-prompt", tags=["Images"])
+async def enhance_image_prompt(prompt: str = Body(..., embed=True)):
+    """
+    Enhance a prompt for better image generation using Llama 3.2
+    """
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+            response = await client.post(
+                f"{IMAGE_SERVICE_URL}/api/images/enhance-prompt",
+                params={"prompt": prompt}
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Prompt enhancement error: {response.text}"
+                )
+        
+        except httpx.TimeoutException:
+            raise HTTPException(status_code=504, detail="Prompt enhancement timeout")
+        except httpx.RequestError as e:
+            raise HTTPException(status_code=503, detail=f"Cannot reach image service: {str(e)}")
 
 
 if __name__ == "__main__":
