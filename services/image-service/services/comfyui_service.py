@@ -30,7 +30,7 @@ class ComfyUIService:
         self.base_url = base_url.rstrip('/')
         self.client_id = str(uuid.uuid4())
     
-    def get_sdxl_workflow(
+    def get_sdxl_base_only_workflow(
         self,
         prompt: str,
         negative_prompt: str,
@@ -44,10 +44,43 @@ class ComfyUIService:
         denoise: float
     ) -> dict:
         """
-        Generate ComfyUI workflow JSON for SDXL generation
-        This is a standard SDXL workflow structure
+        Generate ComfyUI workflow JSON for SDXL Base model only
+        Faster generation, good quality
         """
         workflow = {
+            # Load Base Model
+            "4": {
+                "class_type": "CheckpointLoaderSimple",
+                "inputs": {
+                    "ckpt_name": "sd_xl_base_1.0.safetensors"
+                }
+            },
+            # Empty Latent Image
+            "5": {
+                "class_type": "EmptyLatentImage",
+                "inputs": {
+                    "width": width,
+                    "height": height,
+                    "batch_size": 1
+                }
+            },
+            # Positive Prompt
+            "6": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["4", 1]
+                }
+            },
+            # Negative Prompt
+            "7": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["4", 1]
+                }
+            },
+            # KSampler
             "3": {
                 "class_type": "KSampler",
                 "inputs": {
@@ -63,12 +96,93 @@ class ComfyUIService:
                     "latent_image": ["5", 0]
                 }
             },
+            # VAE Decode
+            "8": {
+                "class_type": "VAEDecode",
+                "inputs": {
+                    "samples": ["3", 0],
+                    "vae": ["4", 2]
+                }
+            },
+            # Save Image
+            "9": {
+                "class_type": "SaveImage",
+                "inputs": {
+                    "filename_prefix": "GatherUp_AI",
+                    "images": ["8", 0]
+                }
+            }
+        }
+        return workflow
+    
+    def get_sdxl_workflow(
+        self,
+        prompt: str,
+        negative_prompt: str,
+        width: int,
+        height: int,
+        steps: int,
+        cfg_scale: float,
+        sampler_name: str,
+        scheduler: str,
+        seed: int,
+        denoise: float,
+        use_refiner: bool = True
+    ) -> dict:
+        """
+        Generate ComfyUI workflow JSON for SDXL
+        - use_refiner=True: Base + Refiner (best quality, slower)
+        - use_refiner=False: Base only (faster, good quality)
+        """
+        if not use_refiner:
+            return self.get_sdxl_base_only_workflow(
+                prompt, negative_prompt, width, height, 
+                steps, cfg_scale, sampler_name, scheduler, seed, denoise
+            )
+        
+        # Base + Refiner workflow
+        return self.get_sdxl_base_refiner_workflow(
+            prompt, negative_prompt, width, height,
+            steps, cfg_scale, sampler_name, scheduler, seed, denoise
+        )
+    
+    def get_sdxl_base_refiner_workflow(
+        self,
+        prompt: str,
+        negative_prompt: str,
+        width: int,
+        height: int,
+        steps: int,
+        cfg_scale: float,
+        sampler_name: str,
+        scheduler: str,
+        seed: int,
+        denoise: float
+    ) -> dict:
+        """
+        Generate ComfyUI workflow JSON for SDXL Base + Refiner
+        Uses both base and refiner models for highest quality output
+        """
+        # Split steps between base (80%) and refiner (20%)
+        base_steps = int(steps * 0.8)
+        refiner_steps = steps - base_steps
+        
+        workflow = {
+            # Load Base Model
             "4": {
                 "class_type": "CheckpointLoaderSimple",
                 "inputs": {
                     "ckpt_name": "sd_xl_base_1.0.safetensors"
                 }
             },
+            # Load Refiner Model
+            "10": {
+                "class_type": "CheckpointLoaderSimple",
+                "inputs": {
+                    "ckpt_name": "sd_xl_refiner_1.0.safetensors"
+                }
+            },
+            # Empty Latent Image
             "5": {
                 "class_type": "EmptyLatentImage",
                 "inputs": {
@@ -77,6 +191,7 @@ class ComfyUIService:
                     "batch_size": 1
                 }
             },
+            # Positive Prompt (Base)
             "6": {
                 "class_type": "CLIPTextEncode",
                 "inputs": {
@@ -84,6 +199,7 @@ class ComfyUIService:
                     "clip": ["4", 1]
                 }
             },
+            # Negative Prompt (Base)
             "7": {
                 "class_type": "CLIPTextEncode",
                 "inputs": {
@@ -91,13 +207,63 @@ class ComfyUIService:
                     "clip": ["4", 1]
                 }
             },
+            # Base KSampler (first 80% of steps)
+            "3": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg_scale,
+                    "sampler_name": sampler_name,
+                    "scheduler": scheduler,
+                    "denoise": denoise,
+                    "model": ["4", 0],
+                    "positive": ["6", 0],
+                    "negative": ["7", 0],
+                    "latent_image": ["5", 0]
+                }
+            },
+            # Positive Prompt (Refiner)
+            "11": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["10", 1]
+                }
+            },
+            # Negative Prompt (Refiner)
+            "12": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["10", 1]
+                }
+            },
+            # Refiner KSampler (final 20% of steps for detail enhancement)
+            "13": {
+                "class_type": "KSampler",
+                "inputs": {
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg_scale,
+                    "sampler_name": sampler_name,
+                    "scheduler": scheduler,
+                    "denoise": 0.25,  # Refiner only touches up details
+                    "model": ["10", 0],
+                    "positive": ["11", 0],
+                    "negative": ["12", 0],
+                    "latent_image": ["3", 0]  # Takes output from base sampler
+                }
+            },
+            # VAE Decode (decode refined latent to image)
             "8": {
                 "class_type": "VAEDecode",
                 "inputs": {
-                    "samples": ["3", 0],
-                    "vae": ["4", 2]
+                    "samples": ["13", 0],  # Use refiner output
+                    "vae": ["10", 2]
                 }
             },
+            # Save Image
             "9": {
                 "class_type": "SaveImage",
                 "inputs": {
@@ -208,7 +374,8 @@ class ComfyUIService:
         sampler_name: str,
         scheduler: str,
         seed: int,
-        denoise: float
+        denoise: float,
+        use_refiner: bool = True
     ) -> AsyncGenerator[dict, None]:
         """
         Generate image with streaming progress updates
@@ -235,7 +402,7 @@ class ComfyUIService:
         # Generate workflow
         workflow = self.get_sdxl_workflow(
             prompt, negative_prompt, width, height,
-            steps, cfg_scale, sampler_name, scheduler, seed, denoise
+            steps, cfg_scale, sampler_name, scheduler, seed, denoise, use_refiner
         )
         
         yield {

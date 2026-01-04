@@ -75,7 +75,8 @@ async def generate_images_with_stream(request: ImageGenerationRequest) -> AsyncG
                 sampler_name=request.sampler_name.value,
                 scheduler=request.scheduler.value,
                 seed=seed,
-                denoise=request.denoise
+                denoise=request.denoise,
+                use_refiner=request.use_refiner
             ):
                 # Add image index to progress
                 progress['image_index'] = image_num
@@ -207,7 +208,8 @@ async def generate_images(request: ImageGenerationRequest):
                 sampler_name=request.sampler_name.value,
                 scheduler=request.scheduler.value,
                 seed=seed,
-                denoise=request.denoise
+                denoise=request.denoise,
+                use_refiner=request.use_refiner
             ):
                 if progress.get('status') == 'completed' and progress.get('image_data'):
                     image_data = progress['image_data']

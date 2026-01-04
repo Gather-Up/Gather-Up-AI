@@ -133,18 +133,6 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                 "max_results": location_max_results
             }
             
-            # Prepare image generation payload (based on user prompt)
-            image_payload = {
-                "prompt": request.prompt,
-                "num_images": 2,  # Generate 2 images for the event
-                "steps": 25,      # Balanced speed/quality
-                "width": 1024,
-                "height": 1024,
-                "cfg_scale": 7.5,
-                "sampler_name": "dpmpp_2m",
-                "scheduler": "karras"
-            }
-            
             # Call all services in parallel for efficiency
             vendor_task = client.post(
                 f"{VENDOR_SERVICE_URL}/api/vendors/recommend",
@@ -156,18 +144,18 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                 json=location_payload
             )
             
-            # Call image service with extended timeout
-            image_task = client.post(
-                f"{IMAGE_SERVICE_URL}/api/images/generate",
-                json=image_payload,
-                timeout=IMAGE_SERVICE_TIMEOUT
+            # Get AI-enhanced prompt for image generation (no actual image generation)
+            prompt_task = client.post(
+                f"{IMAGE_SERVICE_URL}/api/images/enhance-prompt",
+                params={"prompt": request.prompt},
+                timeout=30.0
             )
             
             # Wait for all responses
-            vendor_response, location_response, image_response = await asyncio.gather(
+            vendor_response, location_response, prompt_response = await asyncio.gather(
                 vendor_task,
                 location_task,
-                image_task,
+                prompt_task,
                 return_exceptions=True
             )
             
@@ -205,21 +193,19 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                     "locations": []
                 }
             
-            # Process image service response
-            image_data = {}
-            if isinstance(image_response, Exception):
-                image_data = {
+            # Process enhanced prompt response
+            image_prompt_data = {}
+            if isinstance(prompt_response, Exception):
+                image_prompt_data = {
                     "status": "error",
-                    "message": f"Image service error: {str(image_response)}",
-                    "images": []
+                    "message": f"Prompt enhancement error: {str(prompt_response)}"
                 }
-            elif image_response.status_code == 200:
-                image_data = image_response.json()
+            elif prompt_response.status_code == 200:
+                image_prompt_data = prompt_response.json()
             else:
-                image_data = {
+                image_prompt_data = {
                     "status": "error",
-                    "message": f"Image service returned status {image_response.status_code}",
-                    "images": []
+                    "message": f"Prompt service returned status {prompt_response.status_code}"
                 }
             
             # Aggregate results
@@ -228,9 +214,9 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                 "user_prompt": request.prompt,
                 "recommendations": {
                     "vendors": vendor_data,
-                    "locations": location_data,
-                    "images": image_data
+                    "locations": location_data
                 },
+                "image_generation_prompt": image_prompt_data.get("enhanced_prompt", request.prompt),
                 "summary": generate_summary(vendor_data, location_data)
             }
             
@@ -346,6 +332,7 @@ class ImageGenerationRequest(BaseModel):
     scheduler: str = Field(default="karras")
     seed: Optional[int] = None
     denoise: float = Field(default=1.0, ge=0.0, le=1.0)
+    use_refiner: bool = Field(default=True, description="Use SDXL Refiner for enhanced quality (True = Base+Refiner, False = Base only)")
 
 
 @app.post("/api/v1/images/generate", tags=["Images"])
@@ -444,5 +431,5 @@ async def enhance_image_prompt(prompt: str = Body(..., embed=True)):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("GATEWAY_PORT", "8000"))
+    port = int(os.getenv("GATEWAY_PORT", "8080"))
     uvicorn.run(app, host="0.0.0.0", port=port)

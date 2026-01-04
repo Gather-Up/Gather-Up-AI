@@ -13,7 +13,7 @@ SERVICES = [
         "name": "API Gateway",
         "path": PROJECT_ROOT / "api-gateway",
         "command": "python main.py",
-        "port": "8000"
+        "port": "8080"
     },
     {
         "name": "Vendor Service",
@@ -110,7 +110,7 @@ def main():
     print("=" * 60)
     print()
     print("Service URLs:")
-    print(f"  • API Gateway:      http://localhost:8000")
+    print(f"  • API Gateway:      http://localhost:8080")
     print(f"  • Vendor Service:   http://localhost:8001")
     print(f"  • Location Service: http://localhost:8002")
     print(f"  • Image Service:    http://localhost:8003")

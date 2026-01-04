@@ -59,6 +59,12 @@ class ImageGenerationRequest(BaseModel):
     # Seed for reproducibility
     seed: Optional[int] = Field(default=None, description="Random seed for reproducibility (None = random)")
     
+    # Model selection
+    use_refiner: bool = Field(
+        default=True, 
+        description="Use SDXL Refiner for enhanced quality (True = Base+Refiner, False = Base only). Refiner adds detail but takes longer."
+    )
+    
     # Denoise strength (for img2img, if implemented later)
     denoise: float = Field(default=1.0, ge=0.0, le=1.0, description="Denoising strength (1.0 = full generation)")
 
