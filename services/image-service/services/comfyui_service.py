@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-COMFYUI_URL = os.getenv("COMFYUI_URL", "http://127.0.0.1:8188")
+COMFYUI_URL = os.getenv("COMFYUI_URL", "http://127.0.0.1:8000")
 COMFYUI_TIMEOUT = int(os.getenv("COMFYUI_TIMEOUT", "300"))
 
 print(f"✓ ComfyUI Configuration:")

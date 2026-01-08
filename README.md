@@ -223,8 +223,8 @@ Follow the detailed guide: **[COMFYUI_SETUP.md](COMFYUI_SETUP.md)**
 Quick steps:
 1. Install ComfyUI
 2. Download SDXL Base 1.0 model
-3. Start ComfyUI on port 8188
-4. Verify with: `http://localhost:8188`
+3. Start ComfyUI on port 8000
+4. Verify with: `http://localhost:8000`
 
 ### 6️⃣ Run the Services
 

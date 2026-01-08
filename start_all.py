@@ -115,7 +115,7 @@ def main():
     print(f"  • Location Service: http://localhost:8002")
     print(f"  • Image Service:    http://localhost:8003")
     print()
-    print("⚠️  Important: Ensure ComfyUI is running on http://localhost:8188")
+    print("⚠️  Important: Ensure ComfyUI is running on http://localhost:8000")
     print("   Image service requires ComfyUI to be active.")
     print()
     print("📝 Each service is running in a separate window.")

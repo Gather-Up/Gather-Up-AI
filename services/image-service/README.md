@@ -6,7 +6,7 @@ The Image Service generates high-quality event graphics using **Stable Diffusion
 ## Architecture
 - **Port**: 8003
 - **Model**: Stable Diffusion XL Base 1.0 + Refiner 1.0 (2-stage pipeline)
-- **ComfyUI**: Running on port 8000 (not default 8188)
+- **ComfyUI**: Running on port 8000 (not default 8000)
 - **Template**: Custom SDXL Base + Refiner workflow
 - **Prompt Enhancement**: Llama 3.2 3B via Ollama (port 11434)
 
