@@ -4,7 +4,7 @@
 The Image Service generates high-quality event graphics using **Stable Diffusion XL (SDXL)** via **ComfyUI**. It includes intelligent prompt enhancement using **Llama 3.2 3B**.
 
 ## Architecture
-- **Port**: 8003
+- **Port**: 8000
 - **Model**: Stable Diffusion XL Base 1.0 + Refiner 1.0 (2-stage pipeline)
 - **ComfyUI**: Running on port 8000 (not default 8000)
 - **Template**: Custom SDXL Base + Refiner workflow
@@ -58,7 +58,7 @@ cd services/image-service
 python main.py
 ```
 
-The service will start on http://localhost:8003
+The service will start on http://localhost:8000
 
 ## API Endpoints
 
@@ -247,7 +247,7 @@ Import `Gather-Up-AI.postman_collection.json` to test all endpoints.
 
 Key collections:
 - **API Gateway (Port 8080)** - Main entry point
-- **Image Service (Port 8003)** - Direct access
+- **Image Service (Port 8000)** - Direct access
 
 ## Integration Example (Frontend)
 

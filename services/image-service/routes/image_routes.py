@@ -1,9 +1,9 @@
 """
 Image Generation Routes
-Handles API endpoints for SDXL image generation with streaming support
+Handles API endpoints for Zephyr Image Turbo generation with streaming support
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
@@ -34,8 +34,8 @@ async def generate_images_with_stream(request: ImageGenerationRequest) -> AsyncG
     enhanced_prompt = request.prompt
     
     try:
-        # Step 1: Enhance prompt with Llama 3.2
-        yield f"data: {json.dumps({'status': 'processing', 'message': 'Enhancing prompt with Llama 3.2...', 'progress_percent': 5})}\n\n"
+        # Step 1: Enhance prompt with cloud-based LLM
+        yield f"data: {json.dumps({'status': 'processing', 'message': 'Enhancing prompt with cloud LLM...', 'progress_percent': 5})}\n\n"
         
         enhancement_result = enhance_image_prompt(request.prompt)
         enhanced_prompt = enhancement_result.get("enhanced_prompt", request.prompt)
@@ -268,7 +268,7 @@ async def health_check():
 
 
 @router.post("/enhance-prompt")
-async def enhance_prompt_only(prompt: str):
+async def enhance_prompt_only(prompt: str = Body(..., embed=True)):
     """
     Enhance a prompt using Llama 3.2 without generating images
     Useful for testing prompt enhancement

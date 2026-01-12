@@ -10,10 +10,10 @@ from dotenv import load_dotenv
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import html
 import json
-from database import EmailTemplateModel, GeneratedEventModel, verify_connection
+from database import EmailTemplateModel, GeneratedEventModel, verify_connection, EventModel
 from cloudinary_service import upload_base64_image
 
 load_dotenv()
@@ -46,16 +46,21 @@ ALLOWED_ORIGINS = os.getenv(
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
     max_age=3600,
 )
 
 # Security headers middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    # Skip security headers for OPTIONS requests (CORS preflight)
+    if request.method == "OPTIONS":
+        response = await call_next(request)
+        return response
+    
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -66,7 +71,7 @@ async def add_security_headers(request: Request, call_next):
 # Service URLs from environment variables
 VENDOR_SERVICE_URL = os.getenv("VENDOR_SERVICE_URL")
 LOCATION_SERVICE_URL = os.getenv("LOCATION_SERVICE_URL")
-IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8003")
+IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8000")
 
 # Request timeout
 SERVICE_TIMEOUT = 30.0
@@ -412,7 +417,7 @@ async def plan_event(request: EventPlanningRequest = Body(...)):
                     logger.info("Generating image prompt...")
                     prompt_response = await client.post(
                         f"{IMAGE_SERVICE_URL}/api/images/enhance-prompt",
-                        params={"prompt": request.prompt},
+                        json={"prompt": request.prompt},
                         timeout=30.0
                     )
                     
@@ -606,7 +611,7 @@ async def generate_images(request: ImageGenerationRequest = Body(...)):
             logger.error(f"Cannot reach image service: {str(e)}")
             raise HTTPException(
                 status_code=503,
-                detail=f"Cannot reach image service at {IMAGE_SERVICE_URL}. Please ensure the Image Service is running on port 8003."
+                detail=f"Cannot reach image service at {IMAGE_SERVICE_URL}. Please ensure the Image Service is running on port 8000."
             )
         except HTTPException:
             raise
@@ -662,7 +667,7 @@ async def enhance_image_prompt(prompt: str = Body(..., embed=True)):
         try:
             response = await client.post(
                 f"{IMAGE_SERVICE_URL}/api/images/enhance-prompt",
-                params={"prompt": prompt}
+                json={"prompt": prompt}
             )
             
             if response.status_code == 200:
@@ -823,23 +828,272 @@ Use \\n for line breaks in the body."""
 
 
 # ============================================================================
-# SAVE EMAIL AND GENERATED EVENT TO MONGODB
+# TASK GENERATION & EVENT SAVING TO MONGODB
 # ============================================================================
 
 class SaveEventDataRequest(BaseModel):
     """Request model for saving complete event generation data"""
-    event_id: Optional[str] = Field(None, description="MongoDB Event ObjectId (if exists)")
+    user_id: Optional[str] = Field("user_temp_123", description="User ID (dummy for now)")
     user_prompt: str = Field(..., description="Original user event planning request")
     email_subject: str = Field(..., description="Generated email subject")
     email_body: str = Field(..., description="Generated email body")
     selected_venue: Dict[str, Any] = Field(..., description="Selected venue details")
-    selected_vendors: Optional[List[Dict[str, Any]]] = Field(default=[], description="All recommended vendors")
+    selected_vendors: List[Dict[str, Any]] = Field(default=[], description="All recommended vendors")
     generated_images: List[str] = Field(default=[], description="Generated images in base64 format")
     image_prompt: Optional[str] = Field(None, description="Prompt used for image generation")
+    event_date: Optional[str] = Field(None, description="Event date in ISO format")
+    guest_count: Optional[int] = Field(None, description="Estimated guest count")
+
+
+async def generate_task_checklist(user_prompt: str, venue_name: str, vendors: List[Dict]) -> List[Dict[str, Any]]:
+    """Generate organizer task checklist using Llama 3.2"""
+    
+    vendor_list = "\n".join([f"- {v.get('vendorName')} ({v.get('vendorType')})" for v in vendors[:5]])
+    
+    llama_prompt = f"""You are an expert event planning assistant. Generate a comprehensive task checklist for the event organizer.
+
+EVENT DETAILS:
+{user_prompt}
+
+VENUE: {venue_name}
+
+VENDORS:
+{vendor_list}
+
+Generate a detailed, actionable task checklist organized by timeframes. Include specific tasks with realistic deadlines.
+
+OUTPUT FORMAT (JSON only, no other text):
+{{
+  "tasks": [
+    {{
+      "task": "Confirm venue booking and pay deposit",
+      "category": "Venue",
+      "priority": "high",
+      "deadline_days_before": 60,
+      "completed": false
+    }},
+    {{
+      "task": "Finalize guest list and send save-the-dates",
+      "category": "Guests",
+      "priority": "high",
+      "deadline_days_before": 45,
+      "completed": false
+    }}
+  ]
+}}
+
+Include tasks for: venue confirmation, vendor bookings, guest management, logistics, decorations, day-of coordination.
+Return ONLY the JSON object, nothing else."""
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            ollama_url = os.getenv("OLLAMA_API_URL", "http://localhost:11434")
+            response = await client.post(
+                f"{ollama_url}/api/generate",
+                json={
+                    "model": "llama3.2:3b",
+                    "prompt": llama_prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.7, "top_p": 0.9, "num_predict": 1500}
+                },
+                timeout=60.0
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                generated_text = result.get("response", "")
+                
+                json_start = generated_text.find('{')
+                json_end = generated_text.rfind('}') + 1
+                if json_start != -1 and json_end > json_start:
+                    task_data = json.loads(generated_text[json_start:json_end])
+                    return task_data.get("tasks", [])
+                    
+    except Exception as e:
+        logger.error(f"Task generation error: {e}")
+    
+    # Fallback default tasks
+    return [
+        {"task": "Confirm venue booking", "category": "Venue", "priority": "high", "deadline_days_before": 60, "completed": False},
+        {"task": "Book selected vendors", "category": "Vendors", "priority": "high", "deadline_days_before": 45, "completed": False},
+        {"task": "Finalize guest list", "category": "Guests", "priority": "medium", "deadline_days_before": 30, "completed": False},
+        {"task": "Send invitations", "category": "Guests", "priority": "medium", "deadline_days_before": 21, "completed": False},
+        {"task": "Arrange transportation/parking", "category": "Logistics", "priority": "medium", "deadline_days_before": 14, "completed": False},
+        {"task": "Final venue walkthrough", "category": "Venue", "priority": "high", "deadline_days_before": 7, "completed": False},
+        {"task": "Confirm all vendor arrivals", "category": "Vendors", "priority": "high", "deadline_days_before": 3, "completed": False},
+        {"task": "Prepare day-of timeline", "category": "Coordination", "priority": "high", "deadline_days_before": 2, "completed": False},
+    ]
+
+
+def extract_event_details_from_prompt(prompt: str) -> Dict[str, Any]:
+    """Extract event type, date, and guest count from user prompt using heuristics"""
+    import re
+    from dateutil import parser as date_parser
+    
+    event_info = {
+        "event_type": "event",
+        "event_date": None,
+        "guest_count": None
+    }
+    
+    # Event type detection
+    event_types = {
+        "wedding": ["wedding", "marriage", "bride", "groom"],
+        "birthday": ["birthday", "bday", "birth day"],
+        "conference": ["conference", "summit", "seminar", "workshop"],
+        "corporate": ["corporate", "business", "company", "professional"],
+        "party": ["party", "celebration"],
+        "meeting": ["meeting", "gathering"]
+    }
+    
+    prompt_lower = prompt.lower()
+    for event_type, keywords in event_types.items():
+        if any(keyword in prompt_lower for keyword in keywords):
+            event_info["event_type"] = event_type
+            break
+    
+    # Guest count extraction
+    guest_patterns = [
+        r'(\d+)\s*(?:people|guests|attendees|persons)',
+        r'(?:for|about|around)\s*(\d+)',
+        r'(\d+)\s*(?:pax|participants)'
+    ]
+    for pattern in guest_patterns:
+        match = re.search(pattern, prompt_lower)
+        if match:
+            event_info["guest_count"] = int(match.group(1))
+            break
+    
+    # Date extraction (simple patterns)
+    try:
+        # Look for date patterns
+        date_match = re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', prompt)
+        if date_match:
+            event_info["event_date"] = date_parser.parse(date_match.group())
+    except:
+        pass
+    
+    return event_info
 
 
 @app.post("/api/v1/save-event-data")
 async def save_event_data(request: SaveEventDataRequest):
+    """
+    Save complete event to MongoDB with real values
+    
+    - Extracts event details from user prompt
+    - Uploads images to Cloudinary
+    - Generates organizer task checklist
+    - Saves to Events collection with proper structure
+    - Returns event ID with cloudinary URLs
+    """
+    try:
+        # Verify MongoDB connection
+        if not verify_connection():
+            raise HTTPException(status_code=503, detail="Database connection failed")
+        
+        logger.info(f"Saving event data for user: {request.user_id}")
+        
+        # Extract event details from prompt
+        event_details = extract_event_details_from_prompt(request.user_prompt)
+        
+        # Use provided date or generate one (3 months from now)
+        if request.event_date:
+            try:
+                event_date = datetime.fromisoformat(request.event_date.replace('Z', '+00:00'))
+            except:
+                event_date = datetime.utcnow() + timedelta(days=90)
+        elif event_details["event_date"]:
+            event_date = event_details["event_date"]
+        else:
+            event_date = datetime.utcnow() + timedelta(days=90)
+        
+        guest_count = request.guest_count or event_details["guest_count"] or 50
+        
+        # Upload images to Cloudinary
+        uploaded_images = []
+        for idx, base64_img in enumerate(request.generated_images):
+            try:
+                if base64_img.startswith('data:image'):
+                    base64_img = base64_img.split(',')[1]
+                
+                cloudinary_result = upload_base64_image(
+                    base64_img,
+                    folder="gatherup/events",
+                    public_id=f"event_{datetime.utcnow().timestamp()}_{idx}"
+                )
+                
+                uploaded_images.append({
+                    "url": cloudinary_result["url"],
+                    "cloudinary_id": cloudinary_result["cloudinary_id"],
+                    "width": cloudinary_result["width"],
+                    "height": cloudinary_result["height"],
+                    "uploaded_at": datetime.utcnow()
+                })
+                
+            except Exception as img_error:
+                logger.error(f"Image {idx} upload error: {str(img_error)}")
+                continue
+        
+        # Generate organizer task checklist
+        task_checklist = await generate_task_checklist(
+            request.user_prompt,
+            request.selected_venue.get("name", ""),
+            request.selected_vendors
+        )
+        
+        # Calculate budget estimate
+        vendor_pricing = []
+        for vendor in request.selected_vendors:
+            pricing = vendor.get("pricing", "")
+            if pricing and "$" in pricing:
+                # Extract numbers from pricing strings
+                import re
+                numbers = re.findall(r'\d+', pricing.replace(',', ''))
+                if numbers:
+                    vendor_pricing.append(float(numbers[0]))
+        
+        budget_estimate = sum(vendor_pricing) if vendor_pricing else None
+        
+        # Create event in MongoDB
+        event_id = EventModel.create(
+            user_id=request.user_id,
+            user_prompt=request.user_prompt,
+            event_type=event_details["event_type"],
+            event_date=event_date,
+            guest_count=guest_count,
+            venue=request.selected_venue,
+            vendors=request.selected_vendors,
+            images=uploaded_images,
+            email_template={"subject": request.email_subject, "body": request.email_body},
+            task_checklist=task_checklist,
+            budget_estimate=budget_estimate
+        )
+        
+        logger.info(f"Event created successfully: {event_id}")
+        
+        return {
+            "success": True,
+            "message": "Event saved successfully to MongoDB",
+            "event_id": event_id,
+            "event_type": event_details["event_type"],
+            "event_date": event_date.isoformat(),
+            "guest_count": guest_count,
+            "images_uploaded": len(uploaded_images),
+            "cloudinary_urls": [img["url"] for img in uploaded_images],
+            "tasks_generated": len(task_checklist),
+            "budget_estimate": budget_estimate,
+            "vendors_count": len(request.selected_vendors)
+        }
+        
+    except Exception as e:
+        logger.error(f"Save event error: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to save event: {str(e)}")
+
+
+@app.post("/api/v1/save-event-data-legacy")
+async def save_event_data_legacy(request: SaveEventDataRequest):
+    """Legacy endpoint - kept for backward compatibility"""
     """
     Save email template and generated event data to MongoDB
     

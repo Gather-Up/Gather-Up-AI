@@ -31,7 +31,7 @@ SERVICES = [
         "name": "Image Service",
         "path": PROJECT_ROOT / "services" / "image-service",
         "command": "python main.py",
-        "port": "8003"
+        "port": "8000"
     }
 ]
 
@@ -113,7 +113,7 @@ def main():
     print(f"  • API Gateway:      http://localhost:8080")
     print(f"  • Vendor Service:   http://localhost:8001")
     print(f"  • Location Service: http://localhost:8002")
-    print(f"  • Image Service:    http://localhost:8003")
+    print(f"  • Image Service:    http://localhost:8000")
     print()
     print("⚠️  Important: Ensure ComfyUI is running on http://localhost:8000")
     print("   Image service requires ComfyUI to be active.")

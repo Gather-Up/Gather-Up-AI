@@ -1,6 +1,6 @@
 """
 Llama Service for Image Prompt Enhancement
-Uses Llama 3.2 3B to enhance user prompts for better SDXL generation
+Uses local Ollama API for prompt enhancement
 """
 
 import requests
@@ -11,24 +11,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OLLAMA_API_URL = os.getenv("OLLAMA_API_URL")
-MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "llama3.2:3b")
+# Local Ollama configuration (primary)
+OLLAMA_LOCAL_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434")
+LOCAL_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "llama3.2:3b")
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 
-# Configuration for image prompt enhancement (faster, creative)
+# Configuration for image prompt enhancement (creative)
 PROMPT_ENHANCEMENT_CONFIG = {
-    "num_gpu": int(os.getenv("OLLAMA_NUM_GPU", "99")),
-    "num_thread": int(os.getenv("OLLAMA_NUM_THREAD", "8")),
-    "temperature": 0.8,  # More creative for image prompts
+    "temperature": 0.8,
     "top_p": 0.9,
     "top_k": 40,
     "repeat_penalty": 1.1,
+    "num_predict": 300
 }
 
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
-
 print(f"✓ Llama Service Configuration for Image Prompts:")
-print(f"  - Model: {MODEL_NAME}")
-print(f"  - API URL: {OLLAMA_API_URL}")
+print(f"  - Local Model: {LOCAL_MODEL_NAME} @ {OLLAMA_LOCAL_URL}")
 print(f"  - Temperature: {PROMPT_ENHANCEMENT_CONFIG['temperature']} (creative mode)")
 
 
@@ -121,16 +119,18 @@ OUTPUT: Only the image generation prompt (50-80 words)"""
         user_message += f"\nAdditional context: {context}"
     
     try:
-        # Call Ollama API
+        # Use local Ollama API
         payload = {
-            "model": MODEL_NAME,
+            "model": LOCAL_MODEL_NAME,
             "prompt": f"{system_prompt}\n\n{user_message}",
             "stream": False,
             "options": PROMPT_ENHANCEMENT_CONFIG
         }
         
+        print(f"🚀 Calling local Ollama at {OLLAMA_LOCAL_URL}...")
+        
         response = requests.post(
-            f"{OLLAMA_API_URL}/api/generate",
+            f"{OLLAMA_LOCAL_URL}/api/generate",
             json=payload,
             timeout=OLLAMA_TIMEOUT
         )
@@ -139,56 +139,47 @@ OUTPUT: Only the image generation prompt (50-80 words)"""
             result = response.json()
             enhanced_prompt = result.get("response", "").strip()
             
-            print(f"🔍 Raw Llama response: {enhanced_prompt[:150]}...")
+            print(f"✓ Local Ollama response: {enhanced_prompt[:150]}...")
             
-            # Clean up response - be less aggressive
+            # Clean up response
             enhanced_prompt = enhanced_prompt.replace('"', '').strip()
             
-            # Only remove explanation text if there's a clear separator
             if "\n\nThis " in enhanced_prompt or "\n\nNote:" in enhanced_prompt:
                 enhanced_prompt = enhanced_prompt.split("\n\n")[0].strip()
             
-            # Remove ONLY if it's clearly meta-text at the start
             meta_markers = ["OUTPUT:", "PROMPT:", "ENHANCED PROMPT:"]
             for marker in meta_markers:
                 if enhanced_prompt.upper().startswith(marker):
                     enhanced_prompt = enhanced_prompt[len(marker):].strip()
                     break
             
-            # If result is reasonable length, use it - don't fall back too quickly
             if 20 <= len(enhanced_prompt) <= 600:
-                print(f"✓ Using Llama-generated prompt ({len(enhanced_prompt)} chars)")
+                print(f"✓ Using local Ollama prompt ({len(enhanced_prompt)} chars)")
                 print(f"  Design prompt: {enhanced_prompt[:120]}...")
+                return {
+                    "status": "success",
+                    "original_prompt": user_prompt,
+                    "enhanced_prompt": enhanced_prompt,
+                    "model_used": LOCAL_MODEL_NAME
+                }
             else:
                 print(f"⚠️ Prompt length unusual ({len(enhanced_prompt)} chars), using fallback")
-                enhanced_prompt = create_safe_default_prompt(user_prompt)
-            
-            return {
-                "status": "success",
-                "original_prompt": user_prompt,
-                "enhanced_prompt": enhanced_prompt,
-                "model_used": MODEL_NAME
-            }
-        
+                raise ValueError("Invalid prompt length")
         else:
-            print(f"❌ Ollama API error: {response.status_code}")
-            fallback_prompt = create_safe_default_prompt(user_prompt)
+            print(f"❌ Local Ollama returned {response.status_code}")
+            raise Exception(f"Ollama API error: {response.status_code}")
+    
+    except Exception as e:
+        print(f"❌ Ollama failed: {str(e)}")
+        print(f"🛑 Using safe default prompt")
+        fallback_prompt = create_safe_default_prompt(user_prompt)
             return {
                 "status": "fallback",
                 "original_prompt": user_prompt,
                 "enhanced_prompt": fallback_prompt,
-                "error": f"API returned {response.status_code}"
+                "model_used": "default",
+                "error": str(cloud_error)
             }
-    
-    except requests.exceptions.Timeout:
-        print(f"⚠️ Ollama timeout - using default prompt")
-        fallback_prompt = create_safe_default_prompt(user_prompt)
-        return {
-            "status": "fallback",
-            "original_prompt": user_prompt,
-            "enhanced_prompt": fallback_prompt,
-            "error": "Timeout"
-        }
     
     except Exception as e:
         print(f"❌ Error enhancing prompt: {str(e)}")

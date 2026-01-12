@@ -10,7 +10,7 @@ import base64
 from pathlib import Path
 
 # Configuration
-API_BASE_URL = "http://localhost:8003/api/images"
+API_BASE_URL = "http://localhost:8000/api/images"
 OUTPUT_DIR = "test_outputs"
 
 def test_health_check():

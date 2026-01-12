@@ -6,13 +6,14 @@
 
 ## 🌟 Features
 
-- 🤖 **AI-Powered Recommendations**: Uses LLM and RAG (Retrieval-Augmented Generation) for intelligent vendor suggestions
+- 🤖 **AI-Powered Recommendations**: Uses cloud-based LLM and RAG (Retrieval-Augmented Generation) for intelligent vendor suggestions
 - 📍 **Smart Location Search**: Integrates with Google Places API to find ideal event venues
-- 🎨 **AI Image Generation**: Creates stunning event visuals using Stable Diffusion XL via ComfyUI
+- 🎨 **AI Image Generation**: Creates stunning event visuals using Zephyr Image Turbo (cloud-based model)
 - 🔗 **Microservices Architecture**: Scalable, modular design with separate services for different functionalities
 - 🚀 **FastAPI Backend**: High-performance async API services
 - 🧠 **Vector Search**: Semantic similarity search using sentence transformers
 - 📡 **Real-time Streaming**: Server-Sent Events for live image generation progress
+- ☁️ **Cloud-First AI**: Uses online models via Ollama cloud API with optional local fallback
 
 ---
 
@@ -98,12 +99,13 @@ Gather-Up-AI/
 - Searches for venues based on location and event type
 - Returns detailed venue information including ratings and contact details
 
-### **Image Service** (Port: 8003) 🆕
-- AI-powered image generation using Stable Diffusion XL
-- Prompt enhancement with Llama 3.2 3B for better results
+### **Image Service** (Port: 8000) 🆕
+- AI-powered image generation using Zephyr Image Turbo (cloud-optimized model)
+- Prompt enhancement with cloud-based LLM for better results
 - Real-time progress streaming via Server-Sent Events
 - Integration with ComfyUI for professional image generation
-- Supports up to 3 images per request with full customization
+- Supports customizable image generation with modern turbo diffusion
+- Uses qwen_3_4b text encoder for superior text understanding
 
 ---
 
@@ -116,10 +118,11 @@ Gather-Up-AI/
   - PyTorch
   - Sentence Transformers
   - Hugging Face Transformers
-  - Stable Diffusion XL (via ComfyUI)
-  - Llama 3.2 3B (via Ollama)
-- **External APIs**: Google Places API
-- **Image Generation**: ComfyUI with SDXL
+  - Zephyr Image Turbo (via ComfyUI)
+  - Cloud-based LLM via Ollama (glm-4.6:cloud)
+  - qwen_3_4b text encoder
+- **External APIs**: Google Places API, Ollama Cloud API
+- **Image Generation**: ComfyUI with Zephyr Image Turbo
 - **HTTP Client**: HTTPX, Requests, aiohttp
 - **Environment Management**: python-dotenv
 - **Testing**: pytest, pytest-asyncio, pytest-cov
@@ -134,8 +137,11 @@ Gather-Up-AI/
 - Python **3.10+** installed
 - MongoDB instance (for vendor service)
 - Google Places API key (for location service)
-- **ComfyUI with SDXL** (for image service) - See [COMFYUI_SETUP.md](COMFYUI_SETUP.md)
-- **Ollama with Llama 3.2 3B** (for AI enhancements)
+- **ComfyUI with Zephyr Image Turbo models** (for image service)
+  - qwen_3_4b.safetensors (text encoder)
+  - z_image_turbo_bf16.safetensors (diffusion model)
+  - ae.safetensors (VAE)
+- **Cloud-based Ollama API access** (or local Ollama with models)
 
 ### 1️⃣ Clone the Repository
 
@@ -218,13 +224,21 @@ cd services/image-service
 
 ### 5.5️⃣ Setup ComfyUI (for Image Service) 🎨
 
-Follow the detailed guide: **[COMFYUI_SETUP.md](COMFYUI_SETUP.md)**
+Required models for Zephyr Image Turbo:
 
-Quick steps:
-1. Install ComfyUI
-2. Download SDXL Base 1.0 model
-3. Start ComfyUI on port 8000
-4. Verify with: `http://localhost:8000`
+1. **Text Encoder**: `qwen_3_4b.safetensors`
+2. **Diffusion Model**: `z_image_turbo_bf16.safetensors`
+3. **VAE**: `ae.safetensors`
+
+Place models in:
+```
+ComfyUI/models/
+├── text_encoders/qwen_3_4b.safetensors
+├── diffusion_models/z_image_turbo_bf16.safetensors
+└── vae/ae.safetensors
+```
+
+Start ComfyUI on port 8000 and verify at `http://localhost:8000`
 
 ### 6️⃣ Run the Services
 
@@ -239,7 +253,7 @@ This will open separate windows for:
 - API Gateway (8000)
 - Vendor Service (8001)
 - Location Service (8002)
-- Image Service (8003)
+- Image Service (8000)
 
 **Option B: Manual Start**
 

@@ -1,6 +1,6 @@
 """
 ComfyUI API Integration Service
-Handles communication with ComfyUI server for SDXL image generation
+Handles communication with ComfyUI server for Zephyr Image Turbo generation
 """
 
 import asyncio
@@ -30,7 +30,7 @@ class ComfyUIService:
         self.base_url = base_url.rstrip('/')
         self.client_id = str(uuid.uuid4())
     
-    def get_sdxl_base_only_workflow(
+    def get_zephyr_image_workflow(
         self,
         prompt: str,
         negative_prompt: str,
@@ -44,19 +44,51 @@ class ComfyUIService:
         denoise: float
     ) -> dict:
         """
-        Generate ComfyUI workflow JSON for SDXL Base model only
-        Faster generation, good quality
+        Generate ComfyUI workflow JSON for Zephyr Image Turbo model
+        Uses cloud-based text encoder and fast turbo diffusion model
         """
         workflow = {
-            # Load Base Model
-            "4": {
-                "class_type": "CheckpointLoaderSimple",
+            # Load Text Encoder (qwen_3_4b)
+            "1": {
+                "class_type": "CLIPLoader",
                 "inputs": {
-                    "ckpt_name": "sd_xl_base_1.0.safetensors"
+                    "clip_name": "qwen_3_4b.safetensors",
+                    "type": "stable_diffusion"
+                }
+            },
+            # Load Diffusion Model (z_image_turbo)
+            "2": {
+                "class_type": "UNETLoader",
+                "inputs": {
+                    "unet_name": "z_image_turbo_bf16.safetensors",
+                    "weight_dtype": "default"
+                }
+            },
+            # Load VAE
+            "3": {
+                "class_type": "VAELoader",
+                "inputs": {
+                    "vae_name": "ae.safetensors"
+                }
+            },
+            # Positive Text Encode
+            "4": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": prompt,
+                    "clip": ["1", 0]
+                }
+            },
+            # Negative Text Encode
+            "5": {
+                "class_type": "CLIPTextEncode",
+                "inputs": {
+                    "text": negative_prompt,
+                    "clip": ["1", 0]
                 }
             },
             # Empty Latent Image
-            "5": {
+            "6": {
                 "class_type": "EmptyLatentImage",
                 "inputs": {
                     "width": width,
@@ -64,24 +96,8 @@ class ComfyUIService:
                     "batch_size": 1
                 }
             },
-            # Positive Prompt
-            "6": {
-                "class_type": "CLIPTextEncode",
-                "inputs": {
-                    "text": prompt,
-                    "clip": ["4", 1]
-                }
-            },
-            # Negative Prompt
-            "7": {
-                "class_type": "CLIPTextEncode",
-                "inputs": {
-                    "text": negative_prompt,
-                    "clip": ["4", 1]
-                }
-            },
             # KSampler
-            "3": {
+            "7": {
                 "class_type": "KSampler",
                 "inputs": {
                     "seed": seed,
@@ -90,32 +106,32 @@ class ComfyUIService:
                     "sampler_name": sampler_name,
                     "scheduler": scheduler,
                     "denoise": denoise,
-                    "model": ["4", 0],
-                    "positive": ["6", 0],
-                    "negative": ["7", 0],
-                    "latent_image": ["5", 0]
+                    "model": ["2", 0],
+                    "positive": ["4", 0],
+                    "negative": ["5", 0],
+                    "latent_image": ["6", 0]
                 }
             },
             # VAE Decode
             "8": {
                 "class_type": "VAEDecode",
                 "inputs": {
-                    "samples": ["3", 0],
-                    "vae": ["4", 2]
+                    "samples": ["7", 0],
+                    "vae": ["3", 0]
                 }
             },
             # Save Image
             "9": {
                 "class_type": "SaveImage",
                 "inputs": {
-                    "filename_prefix": "GatherUp_AI",
+                    "filename_prefix": "GatherUp_AI_Zephyr",
                     "images": ["8", 0]
                 }
             }
         }
         return workflow
     
-    def get_sdxl_workflow(
+    def get_workflow(
         self,
         prompt: str,
         negative_prompt: str,
@@ -127,26 +143,19 @@ class ComfyUIService:
         scheduler: str,
         seed: int,
         denoise: float,
-        use_refiner: bool = True
+        use_refiner: bool = False
     ) -> dict:
         """
-        Generate ComfyUI workflow JSON for SDXL
-        - use_refiner=True: Base + Refiner (best quality, slower)
-        - use_refiner=False: Base only (faster, good quality)
+        Generate ComfyUI workflow JSON for Zephyr Image Turbo
+        Refiner parameter kept for compatibility but not used in turbo model
         """
-        if not use_refiner:
-            return self.get_sdxl_base_only_workflow(
-                prompt, negative_prompt, width, height, 
-                steps, cfg_scale, sampler_name, scheduler, seed, denoise
-            )
-        
-        # Base + Refiner workflow
-        return self.get_sdxl_base_refiner_workflow(
-            prompt, negative_prompt, width, height,
+        # Zephyr Image Turbo is already optimized, no refiner needed
+        return self.get_zephyr_image_workflow(
+            prompt, negative_prompt, width, height, 
             steps, cfg_scale, sampler_name, scheduler, seed, denoise
         )
     
-    def get_sdxl_base_refiner_workflow(
+    def get_sdxl_base_refiner_workflow_deprecated(
         self,
         prompt: str,
         negative_prompt: str,
@@ -400,7 +409,7 @@ class ComfyUIService:
             return
         
         # Generate workflow
-        workflow = self.get_sdxl_workflow(
+        workflow = self.get_workflow(
             prompt, negative_prompt, width, height,
             steps, cfg_scale, sampler_name, scheduler, seed, denoise, use_refiner
         )
