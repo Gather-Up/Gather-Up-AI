@@ -6,11 +6,14 @@
 
 ## 🌟 Features
 
-- 🤖 **AI-Powered Recommendations**: Uses LLM and RAG (Retrieval-Augmented Generation) for intelligent vendor suggestions
+- 🤖 **AI-Powered Recommendations**: Uses cloud-based LLM and RAG (Retrieval-Augmented Generation) for intelligent vendor suggestions
 - 📍 **Smart Location Search**: Integrates with Google Places API to find ideal event venues
+- 🎨 **AI Image Generation**: Creates stunning event visuals using Zephyr Image Turbo (cloud-based model)
 - 🔗 **Microservices Architecture**: Scalable, modular design with separate services for different functionalities
 - 🚀 **FastAPI Backend**: High-performance async API services
 - 🧠 **Vector Search**: Semantic similarity search using sentence transformers
+- 📡 **Real-time Streaming**: Server-Sent Events for live image generation progress
+- ☁️ **Cloud-First AI**: Uses online models via Ollama cloud API with optional local fallback
 
 ---
 
@@ -40,24 +43,39 @@ Gather-Up-AI/
 │   │   └── tests/
 │   │       └── test_main.py
 │   │
-│   └── vendor-service/           # RAG-based vendor recommendations
+│   ├── vendor-service/           # RAG-based vendor recommendations
+│   │   ├── main.py
+│   │   ├── requirements.txt
+│   │   ├── database.py
+│   │   ├── schemas.py
+│   │   ├── .env.example
+│   │   ├── .env
+│   │   ├── routes/
+│   │   │   └── vendor_routes.py
+│   │   ├── services/
+│   │   │   ├── llama_service.py
+│   │   │   └── vector_service.py
+│   │   └── tests/
+│   │       └── test_main.py
+│   │
+│   └── image-service/            # 🆕 AI Image Generation with SDXL
 │       ├── main.py
 │       ├── requirements.txt
-│       ├── database.py
 │       ├── schemas.py
-│       ├── .env.example
 │       ├── .env
 │       ├── routes/
-│       │   └── vendor_routes.py
+│       │   └── image_routes.py
 │       ├── services/
-│       │   ├── llama_service.py
-│       │   └── vector_service.py
-│       └── tests/
-│           └── test_main.py
+│       │   ├── comfyui_service.py
+│       │   └── llama_service.py
+│       ├── test_service.py
+│       └── README.md
 │
-├── .venv/                       
+├── .venv/
+├── start_all.py                  # 🔥 One-click launcher for all services
+├── COMFYUI_SETUP.md             # 🎨 ComfyUI installation guide
 ├── .gitignore
-├── README.md
+└── README.md
 ```
 
 ---
@@ -68,6 +86,7 @@ Gather-Up-AI/
 - Central entry point for all client requests
 - Routes requests to appropriate microservices
 - Handles CORS and request/response aggregation
+- Supports streaming responses for image generation
 
 ### **Vendor Service** (Port: 8001)
 - Manages vendor data in MongoDB
@@ -80,6 +99,14 @@ Gather-Up-AI/
 - Searches for venues based on location and event type
 - Returns detailed venue information including ratings and contact details
 
+### **Image Service** (Port: 8000) 🆕
+- AI-powered image generation using Zephyr Image Turbo (cloud-optimized model)
+- Prompt enhancement with cloud-based LLM for better results
+- Real-time progress streaming via Server-Sent Events
+- Integration with ComfyUI for professional image generation
+- Supports customizable image generation with modern turbo diffusion
+- Uses qwen_3_4b text encoder for superior text understanding
+
 ---
 
 ## 🛠️ Technology Stack
@@ -91,8 +118,12 @@ Gather-Up-AI/
   - PyTorch
   - Sentence Transformers
   - Hugging Face Transformers
-- **External APIs**: Google Places API
-- **HTTP Client**: HTTPX, Requests
+  - Zephyr Image Turbo (via ComfyUI)
+  - Cloud-based LLM via Ollama (glm-4.6:cloud)
+  - qwen_3_4b text encoder
+- **External APIs**: Google Places API, Ollama Cloud API
+- **Image Generation**: ComfyUI with Zephyr Image Turbo
+- **HTTP Client**: HTTPX, Requests, aiohttp
 - **Environment Management**: python-dotenv
 - **Testing**: pytest, pytest-asyncio, pytest-cov
 - **CI/CD**: GitHub Actions
@@ -106,6 +137,11 @@ Gather-Up-AI/
 - Python **3.10+** installed
 - MongoDB instance (for vendor service)
 - Google Places API key (for location service)
+- **ComfyUI with Zephyr Image Turbo models** (for image service)
+  - qwen_3_4b.safetensors (text encoder)
+  - z_image_turbo_bf16.safetensors (diffusion model)
+  - ae.safetensors (VAE)
+- **Cloud-based Ollama API access** (or local Ollama with models)
 
 ### 1️⃣ Clone the Repository
 
@@ -147,6 +183,7 @@ Install all service dependencies into the shared virtual environment:
 pip install -r services/api-gateway/requirements.txt
 pip install -r services/location-service/requirements.txt
 pip install -r services/vendor-service/requirements.txt
+pip install -r services/image-service/requirements.txt
 ```
 
 **Note**: For GPU support with PyTorch, use:
@@ -179,9 +216,48 @@ cp .env.example .env
 # Add your MONGODB_URI and other configurations
 ```
 
+**Image Service:** 🆕
+```powershell
+cd services/image-service
+# .env already created - verify COMFYUI_URL and OLLAMA_API_URL
+```
+
+### 5.5️⃣ Setup ComfyUI (for Image Service) 🎨
+
+Required models for Zephyr Image Turbo:
+
+1. **Text Encoder**: `qwen_3_4b.safetensors`
+2. **Diffusion Model**: `z_image_turbo_bf16.safetensors`
+3. **VAE**: `ae.safetensors`
+
+Place models in:
+```
+ComfyUI/models/
+├── text_encoders/qwen_3_4b.safetensors
+├── diffusion_models/z_image_turbo_bf16.safetensors
+└── vae/ae.safetensors
+```
+
+Start ComfyUI on port 8000 and verify at `http://localhost:8000`
+
 ### 6️⃣ Run the Services
 
-Open **3 separate terminal windows**, activate the virtual environment in each, and run:
+**Option A: One-Click Launcher** 🔥 **RECOMMENDED**
+
+```powershell
+# From project root
+python start_all.py
+```
+
+This will open separate windows for:
+- API Gateway (8000)
+- Vendor Service (8001)
+- Location Service (8002)
+- Image Service (8000)
+
+**Option B: Manual Start**
+
+Open **4 separate terminal windows**, activate the virtual environment in each, and run:
 
 **Terminal 1 - API Gateway:**
 ```powershell

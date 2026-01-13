@@ -7,3 +7,5 @@ python-dotenv
 pytest
 pytest-asyncio
 pytest-cov
+pymongo
+cloudinary

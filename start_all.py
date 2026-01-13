@@ -13,7 +13,7 @@ SERVICES = [
         "name": "API Gateway",
         "path": PROJECT_ROOT / "api-gateway",
         "command": "python main.py",
-        "port": "8000"
+        "port": "8080"
     },
     {
         "name": "Vendor Service",
@@ -30,8 +30,8 @@ SERVICES = [
     {
         "name": "Image Service",
         "path": PROJECT_ROOT / "services" / "image-service",
-        "command": "python generate_image.py",
-        "port": "N/A"
+        "command": "python main.py",
+        "port": "8003"
     }
 ]
 
@@ -55,17 +55,22 @@ def start_service(service):
     """Start a service in a new PowerShell window"""
     venv_path = find_venv()
     
+    # Set environment variable for Image Service port
+    env_var = ""
+    if service["name"] == "Image Service":
+        env_var = "set IMAGE_SERVICE_PORT=8003 && "
+    
     if venv_path:
         activate_cmd = get_activation_command(venv_path)
         if activate_cmd:
             # Create a command that activates venv and runs the service
-            full_command = f'cd "{service["path"]}" && call "{activate_cmd}" && {service["command"]}'
+            full_command = f'cd "{service["path"]}" && call "{activate_cmd}" && {env_var}{service["command"]}'
         else:
             print(f"Warning: Virtual environment found but activation script missing")
-            full_command = f'cd "{service["path"]}" && {service["command"]}'
+            full_command = f'cd "{service["path"]}" && {env_var}{service["command"]}'
     else:
         print(f"Warning: No virtual environment found. Running without venv.")
-        full_command = f'cd "{service["path"]}" && {service["command"]}'
+        full_command = f'cd "{service["path"]}" && {env_var}{service["command"]}'
     
     # Start in a new command prompt window
     cmd = f'start "GatherUp - {service["name"]}" cmd /k "{full_command}"'
@@ -110,9 +115,13 @@ def main():
     print("=" * 60)
     print()
     print("Service URLs:")
-    print(f"  • API Gateway:      http://localhost:8000")
+    print(f"  • API Gateway:      http://localhost:8080")
     print(f"  • Vendor Service:   http://localhost:8001")
     print(f"  • Location Service: http://localhost:8002")
+    print(f"  • Image Service:    http://localhost:8003")
+    print()
+    print("⚠️  Important: Ensure ComfyUI is running on http://localhost:8000")
+    print("   Image service connects to ComfyUI on port 8000.")
     print()
     print("📝 Each service is running in a separate window.")
     print("   Close the windows to stop the services.")

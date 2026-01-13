@@ -5,34 +5,34 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-OLLAMA_API_URL = os.getenv("OLLAMA_API_URL")
-MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME")
+# Cloud-based Ollama configuration for RAG system
+OLLAMA_CLOUD_URL = os.getenv("OLLAMA_CLOUD_URL", "https://ollama.ai/api")
+CLOUD_MODEL_NAME = os.getenv("OLLAMA_CLOUD_MODEL", "glm-4.6:cloud")
 
-GPU_CONFIG = {
-    "num_gpu": int(os.getenv("OLLAMA_NUM_GPU")),        
-    "num_thread": int(os.getenv("OLLAMA_NUM_THREAD")),   
-    "num_ctx": int(os.getenv("OLLAMA_NUM_CTX")),       
-    "temperature": float(os.getenv("OLLAMA_TEMPERATURE")),
-    "top_p": float(os.getenv("OLLAMA_TOP_P")),
-    "top_k": int(os.getenv("OLLAMA_TOP_K")),
-    "repeat_penalty": float(os.getenv("OLLAMA_REPEAT_PENALTY")),
-    "main_gpu": int(os.getenv("OLLAMA_MAIN_GPU")),
-    "low_vram": os.getenv("OLLAMA_LOW_VRAM").lower() == "true",
+# Fallback to local if needed
+USE_LOCAL_FALLBACK = os.getenv("USE_LOCAL_OLLAMA_FALLBACK", "false").lower() == "true"
+OLLAMA_LOCAL_URL = os.getenv("OLLAMA_API_URL", "http://localhost:11434")
+LOCAL_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "llama3.2:3b")
+
+# Cloud configuration (simplified - cloud handles optimization)
+CLOUD_CONFIG = {
+    "temperature": float(os.getenv("OLLAMA_TEMPERATURE", "0.7")),
+    "top_p": float(os.getenv("OLLAMA_TOP_P", "0.9")),
+    "top_k": int(os.getenv("OLLAMA_TOP_K", "40")),
+    "repeat_penalty": float(os.getenv("OLLAMA_REPEAT_PENALTY", "1.1")),
+    "num_predict": 200  # Limit for faster responses
 }
 
-OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT"))
-ENABLE_LLM_FALLBACK = os.getenv("ENABLE_LLM_FALLBACK").lower() == "true"
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "30"))
+ENABLE_LLM_FALLBACK = os.getenv("ENABLE_LLM_FALLBACK", "true").lower() == "true"
 
-print(f"✓ LLM Configuration loaded from .env:")
-print(f"  - Model: {MODEL_NAME}")
-print(f"  - API URL: {OLLAMA_API_URL}")
-print(f"  - GPU Layers: {GPU_CONFIG['num_gpu']} (99 = all layers on GPU, 0 = CPU only)")
-print(f"  - CPU Threads: {GPU_CONFIG['num_thread']}")
-print(f"  - Temperature: {GPU_CONFIG['temperature']}")
+print(f"✓ LLM Configuration for RAG System:")
+print(f"  - Cloud Model: {CLOUD_MODEL_NAME} @ {OLLAMA_CLOUD_URL}")
+if USE_LOCAL_FALLBACK:
+    print(f"  - Local Fallback: {LOCAL_MODEL_NAME} @ {OLLAMA_LOCAL_URL}")
+print(f"  - Temperature: {CLOUD_CONFIG['temperature']}")
 print(f"  - Timeout: {OLLAMA_TIMEOUT}s")
-print(f"  - Fallback Enabled: {ENABLE_LLM_FALLBACK}")
-print(f"\n  Note: If GPU not available, Ollama will automatically use CPU.")
-print(f"  To force CPU: Set OLLAMA_NUM_GPU=0 in .env") 
+print(f"  - Fallback Enabled: {ENABLE_LLM_FALLBACK}") 
 
 
 def generate_vendor_recommendation(prompt: str, vendor_data: list, min_similarity: float = None) -> dict:
@@ -104,36 +104,69 @@ Provide a CONCISE response (max 150 words) with:
 Keep it brief, actionable, and user-friendly. Focus on the BEST match."""
     
     try:
-        # Optimized request with shorter timeout and reduced verbosity
-        response = requests.post(
-            OLLAMA_API_URL,
-            json={
-                "model": MODEL_NAME,
-                "prompt": llm_prompt,
-                "stream": False,
-                "options": {
-                    **GPU_CONFIG,
-                    "num_predict": 200,  # Limit response length for speed
-                }
-            },
-            timeout=min(OLLAMA_TIMEOUT, 30)  # Cap at 30 seconds max
-        )
-        
-        if response.status_code == 200:
-            llm_response = response.json()
-            recommendation_text = llm_response.get('response', '').strip()
+        # Try cloud-based Ollama API first
+        try:
+            response = requests.post(
+                f"{OLLAMA_CLOUD_URL}/api/generate",
+                json={
+                    "model": CLOUD_MODEL_NAME,
+                    "prompt": llm_prompt,
+                    "stream": False,
+                    "options": CLOUD_CONFIG
+                },
+                timeout=OLLAMA_TIMEOUT
+            )
             
-            return {
-                "status": "success",
-                "message": recommendation_text,
-                "vendors": top_vendors
-            }
-        else:
-            # Fallback if LLM fails
+            if response.status_code == 200:
+                llm_response = response.json()
+                recommendation_text = llm_response.get('response', '').strip()
+                
+                return {
+                    "status": "success",
+                    "message": recommendation_text,
+                    "vendors": top_vendors,
+                    "model_used": CLOUD_MODEL_NAME
+                }
+            else:
+                print(f"⚠️ Cloud API returned {response.status_code}")
+                raise Exception(f"Cloud API error: {response.status_code}")
+        
+        except Exception as cloud_error:
+            print(f"⚠️ Cloud LLM failed: {str(cloud_error)}")
+            
+            # Try local fallback if enabled
+            if USE_LOCAL_FALLBACK:
+                print(f"🔄 Trying local Ollama fallback...")
+                try:
+                    local_response = requests.post(
+                        f"{OLLAMA_LOCAL_URL}/api/generate",
+                        json={
+                            "model": LOCAL_MODEL_NAME,
+                            "prompt": llm_prompt,
+                            "stream": False,
+                            "options": CLOUD_CONFIG
+                        },
+                        timeout=OLLAMA_TIMEOUT
+                    )
+                    
+                    if local_response.status_code == 200:
+                        llm_response = local_response.json()
+                        recommendation_text = llm_response.get('response', '').strip()
+                        
+                        return {
+                            "status": "success",
+                            "message": recommendation_text,
+                            "vendors": top_vendors,
+                            "model_used": f"{LOCAL_MODEL_NAME} (local fallback)"
+                        }
+                except Exception as local_error:
+                    print(f"❌ Local fallback also failed: {str(local_error)}")
+            
+            # Use default fallback
             if ENABLE_LLM_FALLBACK:
                 return generate_fallback_recommendation(prompt, top_vendors)
             else:
-                raise Exception(f"LLM request failed with status code: {response.status_code}")
+                raise Exception(f"LLM service unavailable: {str(cloud_error)}")
             
     except requests.exceptions.Timeout:
         print(f"LLM request timed out - using fallback")
@@ -142,7 +175,7 @@ Keep it brief, actionable, and user-friendly. Focus on the BEST match."""
         else:
             raise Exception("LLM service timeout")
     except Exception as e:
-        print(f"Error calling LLaMA model: {str(e)}")
+        print(f"Error calling LLM model: {str(e)}")
         if ENABLE_LLM_FALLBACK:
             return generate_fallback_recommendation(prompt, top_vendors)
         else:
