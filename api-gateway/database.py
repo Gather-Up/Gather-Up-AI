@@ -26,6 +26,8 @@ db = client[DATABASE_NAME]
 email_templates_collection = db["email_templates"]
 generated_events_collection = db["generated_events"]
 events_collection = db["Events"]  # Main events collection
+tasks_collection = db["Tasks"]  # Tasks collection
+generated_media_history_collection = db["GeneratedMediaHistory"]  # Media history collection
 
 def get_next_sequence_value(sequence_name: str) -> int:
     """Get next sequence value for auto-increment fields"""
@@ -203,3 +205,95 @@ def verify_connection():
     except Exception as e:
         print(f"MongoDB connection error: {e}")
         return False
+
+
+class TasksModel:
+    """Tasks document model"""
+    
+    @staticmethod
+    def create(
+        title: str,
+        description: str,
+        priority: str,
+        status: str,
+        start_date: datetime,
+        due_date: datetime,
+        employee_acc: str,
+        assigned_to_id: str,
+        event_id: str
+    ) -> str:
+        """Create new task document"""
+        document = {
+            "_id": ObjectId(),
+            "title": title,
+            "description": description,
+            "priority": priority,  # "low", "medium", "high"
+            "status": status,  # "not started", "progress", "complete", "cancelled", "late"
+            "createdDate": datetime.utcnow(),
+            "startDate": start_date,
+            "dueDate": due_date,
+            "completedDate": None,
+            "employeeAcc": employee_acc,  # Employee who will perform the task
+            "assignedToID": assigned_to_id,  # User who created/assigned the task
+            "eventID": event_id,  # Foreign key to Events collection
+            "_class": "com.example.AdminBasic.Entity.Tasks"
+        }
+        result = tasks_collection.insert_one(document)
+        return str(result.inserted_id)
+    
+    @staticmethod
+    def create_multiple(tasks: List[Dict[str, Any]], event_id: str, assigned_to_id: str) -> List[str]:
+        """Create multiple tasks at once"""
+        task_ids = []
+        for task in tasks:
+            task_id = TasksModel.create(
+                title=task["title"],
+                description=task["description"],
+                priority=task.get("priority", "medium"),
+                status=task.get("status", "not started"),
+                start_date=task.get("startDate", datetime.utcnow()),
+                due_date=task["dueDate"],
+                employee_acc=task.get("employeeAcc", assigned_to_id),
+                assigned_to_id=assigned_to_id,
+                event_id=event_id
+            )
+            task_ids.append(task_id)
+        return task_ids
+    
+    @staticmethod
+    def get_by_event(event_id: str) -> List[Dict[str, Any]]:
+        """Get all tasks for an event"""
+        tasks = tasks_collection.find({"eventID": event_id})
+        return [task for task in tasks]
+
+
+class GeneratedMediaHistoryModel:
+    """Generated media history document model"""
+    
+    @staticmethod
+    def create(media_link: str, event_id_string: str) -> str:
+        """Create new media history document"""
+        document = {
+            "_id": ObjectId(),
+            "mediaLink": media_link,  # Cloudinary URL
+            "createdDate": datetime.utcnow(),
+            "eventIDString": event_id_string,  # Foreign key to Events collection
+            "_class": "com.example.AdminBasic.Entity.GeneratedMediaHistory"
+        }
+        result = generated_media_history_collection.insert_one(document)
+        return str(result.inserted_id)
+    
+    @staticmethod
+    def create_multiple(media_links: List[str], event_id_string: str) -> List[str]:
+        """Create multiple media history documents"""
+        media_ids = []
+        for media_link in media_links:
+            media_id = GeneratedMediaHistoryModel.create(media_link, event_id_string)
+            media_ids.append(media_id)
+        return media_ids
+    
+    @staticmethod
+    def get_by_event(event_id_string: str) -> List[Dict[str, Any]]:
+        """Get all media for an event"""
+        media = generated_media_history_collection.find({"eventIDString": event_id_string})
+        return [item for item in media]

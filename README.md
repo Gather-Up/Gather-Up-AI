@@ -8,12 +8,38 @@
 
 - 🤖 **AI-Powered Recommendations**: Uses cloud-based LLM and RAG (Retrieval-Augmented Generation) for intelligent vendor suggestions
 - 📍 **Smart Location Search**: Integrates with Google Places API to find ideal event venues
-- 🎨 **AI Image Generation**: Creates stunning event visuals using Zephyr Image Turbo (cloud-based model)
+- 🎨 **AI Image Generation**: 🆕 **ComfyUI + Ollama Integration** - Fast, high-quality image generation with Z-Image Turbo (4-step generation, ~10s)
+- 🤖 **Intelligent Prompt Enhancement**: Uses Ollama LLM to transform simple prompts into detailed, optimized descriptions
+- ☁️ **Cloud Storage**: Automatic Cloudinary integration for CDN-delivered images
 - 🔗 **Microservices Architecture**: Scalable, modular design with separate services for different functionalities
 - 🚀 **FastAPI Backend**: High-performance async API services
 - 🧠 **Vector Search**: Semantic similarity search using sentence transformers
-- 📡 **Real-time Streaming**: Server-Sent Events for live image generation progress
-- ☁️ **Cloud-First AI**: Uses online models via Ollama cloud API with optional local fallback
+- 🎯 **Event Context Awareness**: Image generation understands event themes, colors, and mood
+
+---
+
+## 🆕 NEW: Image Generation Service
+
+**Generate stunning event images with AI in seconds!**
+
+**Quick Start:**
+1. Install Ollama: `winget install Ollama.Ollama`
+2. Get model: `ollama pull llama3.2`
+3. Configure Cloudinary in `.env`
+4. Start service: `cd services/image-service && .\start-service.ps1`
+
+**Features:**
+- ⚡ **Fast**: ~10-15 seconds per image
+- 🎨 **High Quality**: Z-Image Turbo model optimized for speed
+- 🤖 **Smart**: Ollama LLM enhances prompts automatically
+- ☁️ **Cloud-Ready**: Cloudinary CDN integration
+- 🎯 **Context-Aware**: Understands your event details
+
+**Documentation:**
+- [Quick Start Guide](QUICK_START.md)
+- [Complete Setup Guide](COMFYUI_INTEGRATION_GUIDE.md)
+- [Implementation Summary](IMAGE_SERVICE_IMPLEMENTATION_SUMMARY.md)
+- [Checklist](IMPLEMENTATION_CHECKLIST.md)
 
 ---
 
@@ -82,11 +108,11 @@ Gather-Up-AI/
 
 ## 🏗️ Architecture
 
-### **API Gateway** (Port: 8000)
+### **API Gateway** (Port: 8080)
 - Central entry point for all client requests
 - Routes requests to appropriate microservices
 - Handles CORS and request/response aggregation
-- Supports streaming responses for image generation
+- Supports image generation endpoints
 
 ### **Vendor Service** (Port: 8001)
 - Manages vendor data in MongoDB
@@ -98,6 +124,14 @@ Gather-Up-AI/
 - Integrates with Google Places API
 - Searches for venues based on location and event type
 - Returns detailed venue information including ratings and contact details
+
+### **Image Service** (Port: 8003) 🆕
+- AI-powered image generation using ComfyUI
+- Ollama LLM for intelligent prompt enhancement
+- Z-Image Turbo model for fast generation
+- Cloudinary integration for cloud storage
+- Event context-aware image generation
+- **Your ComfyUI Setup**: Already configured at http://127.0.0.1:8000
 
 ### **Image Service** (Port: 8000) 🆕
 - AI-powered image generation using Zephyr Image Turbo (cloud-optimized model)
