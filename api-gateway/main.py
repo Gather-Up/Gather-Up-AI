@@ -13,7 +13,15 @@ import re
 from datetime import datetime, timedelta
 import html
 import json
-from database import EmailTemplateModel, GeneratedEventModel, verify_connection, EventModel
+import base64
+from database import (
+    EmailTemplateModel, 
+    GeneratedEventModel, 
+    verify_connection, 
+    EventModel,
+    TasksModel,
+    GeneratedMediaHistoryModel
+)
 from cloudinary_service import upload_base64_image
 
 load_dotenv()
@@ -71,7 +79,7 @@ async def add_security_headers(request: Request, call_next):
 # Service URLs from environment variables
 VENDOR_SERVICE_URL = os.getenv("VENDOR_SERVICE_URL")
 LOCATION_SERVICE_URL = os.getenv("LOCATION_SERVICE_URL")
-IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8000")
+IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8003")
 
 # Request timeout
 SERVICE_TIMEOUT = 30.0
@@ -559,28 +567,49 @@ def generate_summary(vendor_data: Dict, location_data: Dict) -> str:
 # ========== IMAGE GENERATION ENDPOINTS ==========
 
 class ImageGenerationRequest(BaseModel):
-    """Image generation request schema"""
-    prompt: str = Field(..., description="Description of the image to generate")
-    num_images: int = Field(default=1, ge=1, le=3, description="Number of images (1-3)")
-    negative_prompt: Optional[str] = None
-    width: int = Field(default=1024, ge=512, le=2048)
-    height: int = Field(default=1024, ge=512, le=2048)
-    steps: int = Field(default=30, ge=1, le=150)
-    cfg_scale: float = Field(default=7.0, ge=1.0, le=30.0)
-    sampler_name: str = Field(default="dpmpp_2m")
-    scheduler: str = Field(default="karras")
-    seed: Optional[int] = None
-    denoise: float = Field(default=1.0, ge=0.0, le=1.0)
-    use_refiner: bool = Field(default=True, description="Use SDXL Refiner for enhanced quality (True = Base+Refiner, False = Base only)")
+    """Image generation request schema for ComfyUI with Ollama enhancement"""
+    prompt: str = Field(..., description="User's simple description or detailed prompt")
+    enhance_prompt: bool = Field(
+        default=True,
+        description="Whether to enhance prompt using Ollama LLM"
+    )
+    event_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Event context (theme, colors, mood, event_type)"
+    )
+    width: int = Field(default=1024, ge=512, le=2048, description="Image width")
+    height: int = Field(default=1024, ge=512, le=2048, description="Image height")
+    seed: Optional[int] = Field(default=None, description="Random seed for reproducibility")
+    upload_to_cloudinary: bool = Field(
+        default=False,
+        description="Whether to upload to Cloudinary (disabled by default - images returned as base64)"
+    )
+    
+    # Additional parameters for frontend compatibility (ignored by image service)
+    num_images: Optional[int] = Field(default=1, description="Number of images to generate")
+    steps: Optional[int] = Field(default=None, description="Inference steps (ignored for Z-Image Turbo)")
+    cfg_scale: Optional[float] = Field(default=None, description="CFG scale (ignored for Z-Image Turbo)")
+    sampler_name: Optional[str] = Field(default=None, description="Sampler name (ignored)")
+    scheduler: Optional[str] = Field(default=None, description="Scheduler (ignored)")
+    denoise: Optional[float] = Field(default=None, description="Denoise strength (ignored)")
+    use_refiner: Optional[bool] = Field(default=False, description="Use refiner (not needed for Z-Image Turbo)")
+
+
+class PromptEnhancementRequest(BaseModel):
+    """Request for prompt enhancement only"""
+    prompt: str = Field(..., description="User's simple prompt")
+    event_context: Optional[Dict[str, Any]] = None
+    generate_variations: bool = Field(default=False)
+    variation_count: int = Field(default=3, ge=1, le=5)
 
 
 @app.post("/api/v1/images/generate", tags=["Images"])
 async def generate_images(request: ImageGenerationRequest = Body(...)):
     """
-    Generate images using SDXL via ComfyUI (non-streaming)
-    Returns complete result after generation
+    Generate images using ComfyUI (Z-Image Turbo) with Ollama prompt enhancement
+    Returns complete result after generation with Cloudinary URL
     """
-    logger.info(f"Image generation request: {request.prompt[:100]}... | Quality: {'High' if request.use_refiner else 'Normal'}")
+    logger.info(f"Image generation request: {request.prompt[:100]}...")
     
     async with httpx.AsyncClient(timeout=IMAGE_SERVICE_TIMEOUT) as client:
         try:
@@ -591,7 +620,7 @@ async def generate_images(request: ImageGenerationRequest = Body(...)):
             
             if response.status_code == 200:
                 result = response.json()
-                logger.info(f"Image generation successful: {len(result.get('images', []))} images generated")
+                logger.info(f"Image generation successful")
                 return result
             else:
                 error_text = response.text
@@ -605,13 +634,13 @@ async def generate_images(request: ImageGenerationRequest = Body(...)):
             logger.error("Image generation timeout")
             raise HTTPException(
                 status_code=504,
-                detail="Image generation timeout - please try with fewer steps or smaller images"
+                detail="Image generation timeout - please try again"
             )
         except httpx.RequestError as e:
             logger.error(f"Cannot reach image service: {str(e)}")
             raise HTTPException(
                 status_code=503,
-                detail=f"Cannot reach image service at {IMAGE_SERVICE_URL}. Please ensure the Image Service is running on port 8000."
+                detail=f"Cannot reach image service at {IMAGE_SERVICE_URL}. Please ensure the Image Service is running on port 8003."
             )
         except HTTPException:
             raise
@@ -623,51 +652,18 @@ async def generate_images(request: ImageGenerationRequest = Body(...)):
             )
 
 
-@app.post("/api/v1/images/generate/stream", tags=["Images"])
-async def generate_images_stream(request: ImageGenerationRequest = Body(...)):
-    """
-    Generate images with real-time streaming progress (SSE)
-    Perfect for frontend integration with live updates
-    """
-    async def stream_from_image_service():
-        try:
-            async with httpx.AsyncClient(timeout=IMAGE_SERVICE_TIMEOUT) as client:
-                async with client.stream(
-                    "POST",
-                    f"{IMAGE_SERVICE_URL}/api/images/generate/stream",
-                    json=request.model_dump()
-                ) as response:
-                    if response.status_code != 200:
-                        yield f"data: {{\"status\": \"error\", \"message\": \"Image service error: {response.status_code}\"}}\n\n"
-                        return
-                    
-                    async for chunk in response.aiter_text():
-                        yield chunk
-        
-        except Exception as e:
-            yield f"data: {{\"status\": \"error\", \"message\": \"Stream error: {str(e)}\"}}\n\n"
-    
-    return StreamingResponse(
-        stream_from_image_service(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
-
 
 @app.post("/api/v1/images/enhance-prompt", tags=["Images"])
-async def enhance_image_prompt(prompt: str = Body(..., embed=True)):
+async def enhance_image_prompt(request: PromptEnhancementRequest = Body(...)):
     """
-    Enhance a prompt for better image generation using Llama 3.2
+    Enhance a prompt for better image generation using Ollama LLM
+    Returns the enhanced prompt and optional variations for user to review
     """
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
             response = await client.post(
                 f"{IMAGE_SERVICE_URL}/api/images/enhance-prompt",
-                json={"prompt": prompt}
+                json=request.model_dump()
             )
             
             if response.status_code == 200:
@@ -682,6 +678,164 @@ async def enhance_image_prompt(prompt: str = Body(..., embed=True)):
             raise HTTPException(status_code=504, detail="Prompt enhancement timeout")
         except httpx.RequestError as e:
             raise HTTPException(status_code=503, detail=f"Cannot reach image service: {str(e)}")
+
+
+@app.get("/api/v1/images/health", tags=["Images"])
+async def check_image_service_health():
+    """Check health status of ComfyUI and Ollama services"""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            response = await client.get(f"{IMAGE_SERVICE_URL}/api/images/health")
+            return response.json()
+        except Exception as e:
+            return {
+                "status": "unhealthy",
+                "error": str(e),
+                "comfyui_connected": False,
+                "ollama_connected": False
+            }
+
+
+@app.post("/api/v1/images/generate/stream", tags=["Images"])
+async def generate_images_stream(request: ImageGenerationRequest = Body(...)):
+    """
+    Generate images with real-time streaming progress using Server-Sent Events (SSE)
+    Compatible with Z-Image Turbo workflow
+    """
+    logger.info(f"Streaming image generation request: {request.prompt[:100]}...")
+    
+    async def event_generator():
+        """Generate Server-Sent Events for streaming progress"""
+        try:
+            # Send initial progress
+            yield f"data: {json.dumps({'message': 'Initializing image generation...', 'progress_percent': 0})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            # Send prompt enhancement progress
+            if request.enhance_prompt:
+                yield f"data: {json.dumps({'message': 'Enhancing prompt with AI...', 'progress_percent': 10})}\n\n"
+                await asyncio.sleep(0.1)
+            
+            # Send generation start
+            yield f"data: {json.dumps({'message': 'Generating image with ComfyUI...', 'progress_percent': 30})}\n\n"
+            await asyncio.sleep(0.1)
+            
+            # Call the image service
+            async with httpx.AsyncClient(timeout=IMAGE_SERVICE_TIMEOUT) as client:
+                response = await client.post(
+                    f"{IMAGE_SERVICE_URL}/api/images/generate",
+                    json=request.model_dump()
+                )
+                
+                if response.status_code != 200:
+                    error_msg = response.text
+                    logger.error(f"Image service error: {error_msg}")
+                    yield f"data: {json.dumps({'status': 'error', 'message': error_msg})}\n\n"
+                    yield "data: [DONE]\n\n"
+                    return
+                
+                result = response.json()
+                logger.info("Image generation successful")
+                
+                # Send processing progress
+                yield f"data: {json.dumps({'message': 'Processing generated image...', 'progress_percent': 80})}\n\n"
+                await asyncio.sleep(0.1)
+                
+                # Convert response to frontend expected format
+                if result.get('success') and result.get('image_url'):
+                    image_url = result['image_url']
+                    
+                    # Extract base64 data if it's a data URL
+                    if image_url.startswith('data:image/'):
+                        # Format: data:image/png;base64,XXXXX
+                        parts = image_url.split(',', 1)
+                        if len(parts) == 2:
+                            base64_data = parts[1]
+                            image_format = 'png'  # Extract from data URL if needed
+                            
+                            # Send completed response in expected format
+                            completion_data = {
+                                'status': 'completed',
+                                'message': 'Image generation complete!',
+                                'progress_percent': 100,
+                                'images': [{
+                                    'format': image_format,
+                                    'data': base64_data
+                                }],
+                                'metadata': {
+                                    'prompt_id': result.get('prompt_id'),
+                                    'seed': result.get('seed'),
+                                    'original_prompt': result.get('original_prompt'),
+                                    'enhanced_prompt': result.get('enhanced_prompt'),
+                                    'generation_time_seconds': result.get('generation_time_seconds'),
+                                    'cloudinary_url': result.get('cloudinary_public_id')
+                                }
+                            }
+                            yield f"data: {json.dumps(completion_data)}\n\n"
+                        else:
+                            yield f"data: {json.dumps({'status': 'error', 'message': 'Invalid image data format'})}\n\n"
+                    else:
+                        # Cloudinary URL - download and convert to base64
+                        try:
+                            async with httpx.AsyncClient(timeout=30.0) as img_client:
+                                img_response = await img_client.get(image_url)
+                                if img_response.status_code == 200:
+                                    base64_data = base64.b64encode(img_response.content).decode('utf-8')
+                                    completion_data = {
+                                        'status': 'completed',
+                                        'message': 'Image generation complete!',
+                                        'progress_percent': 100,
+                                        'images': [{
+                                            'format': 'png',
+                                            'data': base64_data
+                                        }],
+                                        'metadata': {
+                                            'cloudinary_url': image_url,
+                                            'prompt_id': result.get('prompt_id'),
+                                            'seed': result.get('seed')
+                                        }
+                                    }
+                                    yield f"data: {json.dumps(completion_data)}\n\n"
+                                else:
+                                    yield f"data: {json.dumps({'status': 'error', 'message': 'Failed to download image from Cloudinary'})}\n\n"
+                        except Exception as e:
+                            logger.error(f"Error downloading from Cloudinary: {e}")
+                            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'status': 'error', 'message': 'Image generation failed'})}\n\n"
+                
+        except httpx.TimeoutException:
+            logger.error("Image generation timeout")
+            yield f"data: {json.dumps({'status': 'error', 'message': 'Generation timeout - please try again'})}\n\n"
+        except httpx.RequestError as e:
+            logger.error(f"Cannot reach image service: {e}")
+            yield f"data: {json.dumps({'status': 'error', 'message': f'Cannot reach image service. Please ensure it is running on port 8003.'})}\n\n"
+        except Exception as e:
+            logger.error(f"Unexpected error: {e}", exc_info=True)
+            yield f"data: {json.dumps({'status': 'error', 'message': str(e)})}\n\n"
+        finally:
+            # Send completion marker
+            yield "data: [DONE]\n\n"
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+@app.post("/api/v1/images/enhance-prompt", tags=["Images"])
+async def enhance_image_prompt_legacy(prompt: str = Body(..., embed=True)):
+    """
+    Legacy endpoint for prompt enhancement (simplified)
+    Use /api/v1/images/enhance-prompt with full request body for better results
+    """
+    request = PromptEnhancementRequest(prompt=prompt)
+    return await enhance_image_prompt(request)
 
 
 class EmailTemplateRequest(BaseModel):
@@ -825,6 +979,148 @@ Use \\n for line breaks in the body."""
                 status_code=500,
                 detail=f"Email generation error: {str(e)}"
             )
+
+
+# ============================================================================
+# TASKS API - For Task Division Feature
+# ============================================================================
+
+class TaskRequest(BaseModel):
+    """Single task model"""
+    title: str = Field(..., description="Task title/name")
+    description: str = Field(..., description="Task description/details")
+    priority: str = Field(default="medium", description="Priority: low, medium, high")
+    status: str = Field(default="not started", description="Status: not started, progress, complete, cancelled, late")
+    startDate: datetime = Field(default_factory=datetime.utcnow, description="Start date")
+    dueDate: datetime = Field(..., description="Due date")
+    employeeAcc: str = Field(..., description="Employee account who will do this task")
+
+
+class CreateTasksRequest(BaseModel):
+    """Request to create multiple tasks"""
+    eventID: str = Field(..., description="Event ID (MongoDB ObjectId string)")
+    assignedToID: str = Field(..., description="User ID who is creating these tasks")
+    tasks: List[TaskRequest] = Field(..., description="List of tasks to create")
+
+
+@app.post("/api/v1/tasks/create", tags=["Tasks"])
+async def create_tasks(request: CreateTasksRequest):
+    """
+    Create multiple tasks for an event
+    Tasks will be saved to MongoDB Tasks collection
+    """
+    try:
+        task_ids = TasksModel.create_multiple(
+            tasks=[task.dict() for task in request.tasks],
+            event_id=request.eventID,
+            assigned_to_id=request.assignedToID
+        )
+        
+        return {
+            "success": True,
+            "message": f"Created {len(task_ids)} tasks successfully",
+            "task_ids": task_ids,
+            "event_id": request.eventID
+        }
+    except Exception as e:
+        logger.error(f"Failed to create tasks: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create tasks: {str(e)}"
+        )
+
+
+@app.get("/api/v1/tasks/{event_id}", tags=["Tasks"])
+async def get_tasks_by_event(event_id: str):
+    """Get all tasks for a specific event"""
+    try:
+        tasks = TasksModel.get_by_event(event_id)
+        return {
+            "success": True,
+            "event_id": event_id,
+            "tasks": tasks,
+            "count": len(tasks)
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch tasks: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# MEDIA HISTORY API - For Generated Images with Cloudinary
+# ============================================================================
+
+class SaveMediaRequest(BaseModel):
+    """Request to save generated media"""
+    eventID: str = Field(..., description="Event ID (MongoDB ObjectId string)")
+    images: List[str] = Field(..., description="List of base64 images or Cloudinary URLs")
+    uploadToCloudinary: bool = Field(default=True, description="Whether to upload to Cloudinary")
+
+
+@app.post("/api/v1/media/save", tags=["Media"])
+async def save_generated_media(request: SaveMediaRequest):
+    """
+    Upload images to Cloudinary and save references to MongoDB
+    """
+    try:
+        cloudinary_urls = []
+        
+        if request.uploadToCloudinary:
+            # Upload each image to Cloudinary
+            for idx, image_data in enumerate(request.images):
+                try:
+                    # Check if it's already a URL
+                    if image_data.startswith('http'):
+                        cloudinary_urls.append(image_data)
+                    else:
+                        # Upload base64 image to Cloudinary
+                        result = upload_base64_image(
+                            image_data,
+                            folder="gatherup_events",
+                            public_id=f"event_{request.eventID}_img_{idx}_{datetime.utcnow().timestamp()}"
+                        )
+                        cloudinary_urls.append(result["secure_url"])
+                except Exception as upload_error:
+                    logger.error(f"Failed to upload image {idx}: {upload_error}")
+                    # Continue with other images
+        else:
+            cloudinary_urls = request.images
+        
+        # Save to MongoDB GeneratedMediaHistory
+        media_ids = GeneratedMediaHistoryModel.create_multiple(
+            media_links=cloudinary_urls,
+            event_id_string=request.eventID
+        )
+        
+        return {
+            "success": True,
+            "message": f"Saved {len(media_ids)} images successfully",
+            "media_ids": media_ids,
+            "cloudinary_urls": cloudinary_urls,
+            "event_id": request.eventID
+        }
+    except Exception as e:
+        logger.error(f"Failed to save media: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to save media: {str(e)}"
+        )
+
+
+@app.get("/api/v1/media/{event_id}", tags=["Media"])
+async def get_media_by_event(event_id: str):
+    """Get all generated media for a specific event"""
+    try:
+        media = GeneratedMediaHistoryModel.get_by_event(event_id)
+        return {
+            "success": True,
+            "event_id": event_id,
+            "media": media,
+            "count": len(media)
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch media: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
