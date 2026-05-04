@@ -436,6 +436,13 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
+## Screenshots
+
+<img width="1918" height="1023" alt="Screenshot 2026-01-14 121816" src="https://github.com/user-attachments/assets/2cc998f7-59e2-4f00-9a61-062babd43a6b" />
+<img width="1918" height="1031" alt="Screenshot 2026-01-14 103439" src="https://github.com/user-attachments/assets/f8d6def4-c360-4cca-82ab-939360602008" />
+<img width="1918" height="1026" alt="Screenshot 2026-01-14 103410" src="https://github.com/user-attachments/assets/07845d7d-1b64-4c94-952b-47e6ed95f923" />
+<img width="1918" height="1032" alt="Screenshot 2026-01-14 121837" src="https://github.com/user-attachments/assets/e5aed4ac-eed2-4253-847c-81004a230473" />
+
 ## 📝 Notes
 
 - The shared `.venv` ensures consistency and avoids duplicate installations
